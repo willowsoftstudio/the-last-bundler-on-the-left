@@ -676,8 +676,8 @@ app.get("/", (req: Request, res: Response) => {
         }
         setLoading(true);
         try {
-          const res = await fetch(`/api/bundles/${id}`, {
-            method: "DELETE"
+          const res = await fetch('/api/bundles/' + id, {
+            method: 'DELETE'
           });
           if (res.ok) {
             setToastMessage("Deal deleted successfully!");
