@@ -337,6 +337,115 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
   }
 });
 
+// DELETE endpoint to securely delete a bundle from the database, metafields, and Shopify catalog
+app.delete("/api/bundles/:id", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const session = res.locals.shopify?.session;
+    if (!session) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    // 1. Fetch the bundle from the local database
+    const bundle = await prisma.bundle.findUnique({ where: { id } });
+    if (!bundle) {
+      return res.status(444).json({ error: "Bundle not found in database" });
+    }
+
+    const client = new shopify.api.clients.Graphql({ session });
+
+    // 2. Safely attempt to delete the parent product in Shopify (if it wasn't already deleted manually)
+    if (bundle.parentVariantId) {
+      try {
+        const getProductQuery = `
+          query getProductByVariant($id: ID!) {
+            productVariant(id: $id) {
+              product {
+                id
+              }
+            }
+          }
+        `;
+        const productRes = await client.request(getProductQuery, { variables: { id: bundle.parentVariantId } });
+        const productId = (productRes as any).data?.productVariant?.product?.id;
+
+        if (productId) {
+          const productDeleteMutation = `
+            mutation productDelete($input: ProductDeleteInput!) {
+              productDelete(input: $input) {
+                deletedProductId
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `;
+          await client.request(productDeleteMutation, { variables: { input: { id: productId } } });
+        }
+      } catch (e: any) {
+        console.warn("Could not delete Shopify product (it may have been manually deleted already):", e.message);
+      }
+    }
+
+    // 3. Update active_bundles Metafields by removing this bundle
+    try {
+      const getMetafieldQuery = `
+        query getMetafield {
+          shop {
+            id
+            metafield(namespace: "bundle_app", key: "active_bundles") {
+              value
+            }
+          }
+        }
+      `;
+      const getMetafieldResponse = await client.request(getMetafieldQuery);
+      const shopId = (getMetafieldResponse as any).data?.shop?.id;
+      const existingMetafieldVal = (getMetafieldResponse as any).data?.shop?.metafield?.value;
+
+      if (existingMetafieldVal) {
+        let currentBundles = JSON.parse(existingMetafieldVal);
+        currentBundles = currentBundles.filter((b: any) => b.id !== id);
+
+        const setMetafieldMutation = `
+          mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+            metafieldsSet(metafields: $metafields) {
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `;
+        await client.request(setMetafieldMutation, {
+          variables: {
+            metafields: [
+              {
+                ownerId: shopId,
+                namespace: "bundle_app",
+                key: "active_bundles",
+                value: JSON.stringify(currentBundles),
+                type: "json"
+              }
+            ]
+          }
+        });
+      }
+    } catch (e: any) {
+      console.error("Failed to sync deleted bundle back to Metafields:", e.message);
+    }
+
+    // 4. Delete the bundle from the local PostgreSQL database
+    await prisma.bundle.delete({ where: { id } });
+
+    return res.json({ success: true, message: "Bundle deleted successfully" });
+  } catch (error: any) {
+    console.error("Delete bundle error:", error.message);
+    return res.status(500).json({ error: error.message || "An unexpected error occurred" });
+  }
+});
+
 // Endpoint for webhooks
 app.post("/api/webhooks", verifyShopifyWebhook, async (req: Request, res: Response) => {
   const topic = req.headers["x-shopify-topic"] as string;
@@ -561,6 +670,28 @@ app.get("/", (req: Request, res: Response) => {
         }
       };
 
+      const handleDeleteBundle = async (id) => {
+        if (!confirm("Are you sure you want to delete this deal? This will permanently remove its rules and delete the placeholder product.")) {
+          return;
+        }
+        setLoading(true);
+        try {
+          const res = await fetch(`/api/bundles/${id}`, {
+            method: "DELETE"
+          });
+          if (res.ok) {
+            setToastMessage("Deal deleted successfully!");
+            fetchData();
+          } else {
+            alert("Error deleting deal.");
+          }
+        } catch (err) {
+          alert("Network error deleting deal.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
       return e("div", { style: { maxWidth: "1100px", margin: "0 auto" } }, [
         // Page Header
         e("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" } }, [
@@ -714,7 +845,15 @@ app.get("/", (req: Request, res: Response) => {
               bundles.length === 0 ? e("p", { style: { color: "#6d7175" } }, "You haven't created any deals yet. Let's make one!") : 
               bundles.map((b) => 
                 e("div", { key: b.id, style: { padding: "12px", border: "1px solid #e1e3e5", borderRadius: "6px", marginBottom: "10px", backgroundColor: "#fafbfb" } }, [
-                  e("h4", { style: { fontWeight: "600", color: "#008060", margin: "0 0 4px 0" } }, b.title),
+                  // Header Row with Title & Delete Button
+                  e("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" } }, [
+                    e("h4", { style: { fontWeight: "600", color: "#008060", margin: 0 } }, b.title),
+                    e("button", {
+                      onClick: () => handleDeleteBundle(b.id),
+                      disabled: loading,
+                      style: { background: "none", border: "none", color: "#bf0711", cursor: "pointer", fontSize: "12px", fontWeight: "600", padding: 0 }
+                    }, "Delete")
+                  ]),
                   e("p", { style: { fontSize: "12px", margin: "0 0 6px 0", wordBreak: "break-all", color: "#6d7175" } }, "Tracking ID: " + b.parentVariantId),
                   e("p", { style: { fontSize: "13px", fontWeight: "500", margin: "0 0 2px 0" } }, "Includes:"),
                   b.components.map((c, idx) =>
