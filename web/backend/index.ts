@@ -192,10 +192,11 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
       return res.status(422).json({ error: "Shopify variant configuration failed", details: variantData.userErrors });
     }
 
-    // Step 2: Fetch current active bundles metafield to append the new definition
+    // Step 2: Fetch current active bundles metafield to append the new definition (and get the Shop's GID)
     const getMetafieldQuery = `
       query getMetafield {
         shop {
+          id
           metafield(namespace: "bundle_app", key: "active_bundles") {
             value
           }
@@ -204,6 +205,7 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     `;
 
     const getMetafieldResponse = await client.request(getMetafieldQuery);
+    const shopId = (getMetafieldResponse as any).data?.shop?.id;
     const existingMetafieldVal = (getMetafieldResponse as any).data?.shop?.metafield?.value;
     let currentBundles: any[] = [];
     if (existingMetafieldVal) {
@@ -247,6 +249,7 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
       variables: {
         metafields: [
           {
+            ownerId: shopId,
             namespace: "bundle_app",
             key: "active_bundles",
             value: JSON.stringify(currentBundles),
