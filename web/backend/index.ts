@@ -392,7 +392,7 @@ app.get("/", (req: Request, res: Response) => {
       const handleSelectVariant = async (index) => {
         try {
           const selection = await window.shopify.resourcePicker({
-            type: "variant",
+            type: "product",
             multiple: false,
             action: "select",
             filter: {
@@ -402,8 +402,11 @@ app.get("/", (req: Request, res: Response) => {
             }
           });
           if (selection && selection.length > 0) {
-            const variant = selection[0];
-            const titleText = variant.displayName || (variant.product?.title ? (variant.product.title + " - " + variant.title) : variant.title);
+            const product = selection[0];
+            const variant = product.variants?.[0] || { id: "" };
+            const titleText = (!variant.title || variant.title === "Default Title")
+              ? product.title
+              : (product.title + " - " + variant.title);
             handleComponentChange(index, "variantId", variant.id);
             handleComponentChange(index, "title", titleText);
           }
