@@ -125,12 +125,19 @@ describe("Cart Transform Function - run() Unit Tests", () => {
 
     const output = run(input);
     expect(output.operations).toHaveLength(1);
-    expect(output.operations[0].merge).toEqual({
+    expect(output.operations[0].linesMerge).toEqual({
       parentVariantId: "gid://shopify/ProductVariant/ParentBundle1",
-      lines: [
+      cartLines: [
         { cartLineId: "gid://shopify/CartLine/1", quantity: 2 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 1 }
-      ]
+      ],
+      price: {
+        adjustment: {
+          fixedPricePerUnit: {
+            amount: "0.00"
+          }
+        }
+      }
     });
   });
 
@@ -159,12 +166,19 @@ describe("Cart Transform Function - run() Unit Tests", () => {
 
     const output = run(input);
     expect(output.operations).toHaveLength(1);
-    expect(output.operations[0].merge).toEqual({
+    expect(output.operations[0].linesMerge).toEqual({
       parentVariantId: "gid://shopify/ProductVariant/ParentBundle1",
-      lines: [
-        { cartLineId: "gid://shopify/CartLine/1", quantity: 4 }, // 2 * 2 = 4
-        { cartLineId: "gid://shopify/CartLine/2", quantity: 2 }  // 1 * 2 = 2
-      ]
+      cartLines: [
+        { cartLineId: "gid://shopify/CartLine/1", quantity: 4 },
+        { cartLineId: "gid://shopify/CartLine/2", quantity: 2 }
+      ],
+      price: {
+        adjustment: {
+          fixedPricePerUnit: {
+            amount: "0.00"
+          }
+        }
+      }
     });
   });
 
@@ -193,12 +207,19 @@ describe("Cart Transform Function - run() Unit Tests", () => {
 
     const output = run(input);
     expect(output.operations).toHaveLength(1);
-    expect(output.operations[0].merge).toEqual({
+    expect(output.operations[0].linesMerge).toEqual({
       parentVariantId: "gid://shopify/ProductVariant/ParentBundle1",
-      lines: [
-        { cartLineId: "gid://shopify/CartLine/1", quantity: 4 }, // Only merges 4, leaves 1 unmerged
+      cartLines: [
+        { cartLineId: "gid://shopify/CartLine/1", quantity: 4 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 2 }
-      ]
+      ],
+      price: {
+        adjustment: {
+          fixedPricePerUnit: {
+            amount: "0.00"
+          }
+        }
+      }
     });
   });
 
@@ -232,8 +253,8 @@ describe("Cart Transform Function - run() Unit Tests", () => {
 
     const output = run(input);
     expect(output.operations).toHaveLength(1);
-    expect(output.operations[0].merge.parentVariantId).toEqual("gid://shopify/ProductVariant/ParentBundle1");
-    expect(output.operations[0].merge.lines).toEqual([
+    expect(output.operations[0].linesMerge.parentVariantId).toEqual("gid://shopify/ProductVariant/ParentBundle1");
+    expect(output.operations[0].linesMerge.cartLines).toEqual([
       { cartLineId: "gid://shopify/CartLine/1a", quantity: 1 },
       { cartLineId: "gid://shopify/CartLine/1b", quantity: 1 },
       { cartLineId: "gid://shopify/CartLine/2", quantity: 1 }
@@ -281,8 +302,8 @@ describe("Cart Transform Function - run() Unit Tests", () => {
 
     const output = run(input);
     expect(output.operations).toHaveLength(1);
-    expect(output.operations[0].merge.parentVariantId).toEqual("gid://shopify/ProductVariant/MixMatchParent");
-    expect(output.operations[0].merge.lines).toEqual([
+    expect(output.operations[0].linesMerge.parentVariantId).toEqual("gid://shopify/ProductVariant/MixMatchParent");
+    expect(output.operations[0].linesMerge.cartLines).toEqual([
       { cartLineId: "gid://shopify/CartLine/Red", quantity: 2 },
       { cartLineId: "gid://shopify/CartLine/Blue", quantity: 1 }
     ]);
@@ -329,8 +350,8 @@ describe("Cart Transform Function - run() Unit Tests", () => {
 
     const output = run(input);
     expect(output.operations).toHaveLength(1);
-    expect(output.operations[0].merge.parentVariantId).toEqual("gid://shopify/ProductVariant/MixMatchParent");
-    expect(output.operations[0].merge.lines).toEqual([
+    expect(output.operations[0].linesMerge.parentVariantId).toEqual("gid://shopify/ProductVariant/MixMatchParent");
+    expect(output.operations[0].linesMerge.cartLines).toEqual([
       { cartLineId: "gid://shopify/CartLine/Red", quantity: 5 }, // Greedily consumes all 5 Red
       { cartLineId: "gid://shopify/CartLine/Blue", quantity: 1 }  // Consumes 1 Blue to reach 6 total items (2 bundles)
     ]);

@@ -30,9 +30,16 @@ export interface MergeLineInput {
 }
 
 export interface MergeOperation {
-  merge: {
+  linesMerge: {
     parentVariantId: string;
-    lines: MergeLineInput[];
+    cartLines: MergeLineInput[];
+    price?: {
+      adjustment: {
+        fixedPricePerUnit: {
+          amount: string;
+        };
+      };
+    };
   };
 }
 
@@ -42,6 +49,8 @@ export interface RunOutput {
 
 export interface BundleDefinition {
   id: string; // e.g. "bundle-123"
+  title: string;
+  price?: string; // Stored as a string with exactly 2 decimal places e.g. "29.99"
   parentVariantId: string; // e.g. "gid://shopify/ProductVariant/Parent"
   components: Array<{
     variantId?: string; // e.g. "gid://shopify/ProductVariant/A"
@@ -152,9 +161,16 @@ export function run(input: RunInput): RunOutput {
 
       if (linesPayload.length > 0) {
         operations.push({
-          merge: {
+          linesMerge: {
             parentVariantId: bundle.parentVariantId,
-            lines: linesPayload,
+            cartLines: linesPayload,
+            price: {
+              adjustment: {
+                fixedPricePerUnit: {
+                  amount: bundle.price || "0.00"
+                }
+              }
+            }
           },
         });
       }

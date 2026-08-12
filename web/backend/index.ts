@@ -125,7 +125,7 @@ app.get("/api/publications", shopify.validateAuthenticatedSession(), async (req:
 // Express Endpoint to create a bundle (secured with Shopify's session validation middleware)
 app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
   try {
-    const { title, components, price, status, publications } = req.body;
+    const { title, components, price, status, publications, isVisible, description, imageUrl } = req.body;
 
     if (!title || !components || components.length === 0 || !price) {
       return res.status(400).json({ error: "Missing required bundle fields" });
@@ -180,8 +180,8 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     // Step 1: Create a hidden "Shell Product" representing the parent bundle item.
     // Candace's Audit: We explicitly disable inventory tracking on the Parent SKU to ensure Shopify delegates inventory decrements down to child components.
     const productCreateMutation = `
-      mutation productCreate($product: ProductCreateInput!) {
-        productCreate(product: $product) {
+      mutation productCreate($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
+        productCreate(product: $product, media: $media) {
           product {
             id
             variants(first: 1) {
@@ -200,13 +200,37 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
       }
     `;
 
+    const productPayload: any = {
+      title: title,
+      productType: "Bundle",
+      status: status || "ACTIVE"
+    };
+
+    if (isVisible) {
+      if (description) productPayload.descriptionHtml = description;
+    } else {
+      productPayload.metafields = [
+        {
+          namespace: "seo",
+          key: "hidden",
+          type: "integer",
+          value: "1"
+        }
+      ];
+    }
+
+    const mediaPayload: any[] = [];
+    if (isVisible && imageUrl) {
+      mediaPayload.push({
+        originalSource: imageUrl,
+        mediaContentType: "IMAGE"
+      });
+    }
+
     const productResponse = await client.request(productCreateMutation, {
       variables: {
-        product: {
-          title: title,
-          productType: "Bundle",
-          status: status || "ACTIVE"
-        }
+        product: productPayload,
+        media: mediaPayload.length > 0 ? mediaPayload : null
       }
     });
 
@@ -319,9 +343,11 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     }
 
     const newBundleId = `bundle_${Date.now()}`;
+    const formattedPrice = parseFloat(price).toFixed(2);
     const newBundleDefinition = {
       id: newBundleId,
       title,
+      price: formattedPrice,
       parentVariantId,
       components: components.map((c: any) => ({
         variantId: c.variantId,
@@ -424,7 +450,13 @@ app.delete("/api/bundles/:id", shopify.validateAuthenticatedSession(), async (re
               }
             }
           `;
-          await client.request(productDeleteMutation, { variables: { input: { id: productId } } });
+          const delRes = await client.request(productDeleteMutation, { variables: { input: { id: productId } } });
+          const delData = (delRes as any).data?.productDelete;
+          if (delData?.userErrors?.length > 0) {
+            console.error("Failed to delete Shopify product:", delData.userErrors);
+          } else {
+            console.log("Successfully deleted parent product:", productId);
+          }
         }
       } catch (e: any) {
         console.warn("Could not delete Shopify product (it may have been manually deleted already):", e.message);
@@ -612,6 +644,9 @@ app.get("/", (req: Request, res: Response) => {
       const [status, setStatus] = React.useState("ACTIVE");
       const [availablePublications, setAvailablePublications] = React.useState([]);
       const [selectedPubs, setSelectedPubs] = React.useState([]);
+      const [isVisible, setIsVisible] = React.useState(false);
+      const [description, setDescription] = React.useState("");
+      const [imageUrl, setImageUrl] = React.useState("");
 
       // Fetch active bundles from server
       const fetchData = async () => {
@@ -692,7 +727,7 @@ app.get("/", (req: Request, res: Response) => {
           const res = await fetch("/api/bundles", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, price, components, status, publications: selectedPubs })
+            body: JSON.stringify({ title, price, components, status, publications: selectedPubs, isVisible, description, imageUrl })
           });
           const data = await res.json();
           if (res.ok) {
@@ -701,6 +736,9 @@ app.get("/", (req: Request, res: Response) => {
             setComponents([{ variantId: "", quantity: 1, title: "", image: "" }]);
             setStatus("ACTIVE");
             setSelectedPubs([]);
+            setIsVisible(false);
+            setDescription("");
+            setImageUrl("");
             setToastMessage("Bundle created successfully!");
             fetchData();
           } else {
@@ -781,6 +819,44 @@ app.get("/", (req: Request, res: Response) => {
                     required: true,
                     style: { width: "97%", padding: "10px", borderRadius: "6px", border: "1px solid #c9cccf", fontSize: "15px" }
                   })
+                ]),
+
+                e("div", { style: { marginBottom: "20px" } }, [
+                  e("label", { style: { display: "flex", alignItems: "center", cursor: "pointer", fontWeight: "500", color: "#202223" } }, [
+                    e("input", {
+                      type: "checkbox",
+                      checked: isVisible,
+                      onChange: (ev) => setIsVisible(ev.target.checked),
+                      style: { marginRight: "10px", width: "18px", height: "18px", cursor: "pointer" }
+                    }),
+                    "Display as a standalone product on my storefront?"
+                  ]),
+                  e("p", { style: { fontSize: "12px", color: "#6d7175", marginLeft: "28px", marginTop: "4px" } }, "If unchecked, the deal will merge magically at checkout but won't be visible in search.")
+                ]),
+
+                isVisible && e("div", { style: { padding: "16px", backgroundColor: "#fafbfb", border: "1px solid #e1e3e5", borderRadius: "6px", marginBottom: "20px" } }, [
+                  e("div", { style: { marginBottom: "16px" } }, [
+                    e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "Deal Description"),
+                    e("textarea", {
+                      placeholder: "Describe why this deal is awesome...",
+                      value: description,
+                      onChange: (ev) => setDescription(ev.target.value),
+                      required: true,
+                      rows: 3,
+                      style: { width: "97%", padding: "10px", borderRadius: "6px", border: "1px solid #c9cccf", fontSize: "14px", fontFamily: "inherit", resize: "vertical" }
+                    })
+                  ]),
+                  e("div", null, [
+                    e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "Product Image URL"),
+                    e("input", {
+                      type: "url",
+                      placeholder: "https://example.com/my-bundle-image.jpg",
+                      value: imageUrl,
+                      onChange: (ev) => setImageUrl(ev.target.value),
+                      required: true,
+                      style: { width: "97%", padding: "10px", borderRadius: "6px", border: "1px solid #c9cccf", fontSize: "14px" }
+                    })
+                  ])
                 ]),
 
                 e("div", { style: { marginBottom: "20px" } }, [
