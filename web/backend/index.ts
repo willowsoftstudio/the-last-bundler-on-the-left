@@ -156,17 +156,22 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
         const isRegistered = existingTransforms.some((edge: any) => edge.node.functionId === functionId);
 
         if (!isRegistered) {
+          console.log("Cart Transform not registered yet. Attempting registration for Function ID:", functionId);
           const createTransformMutation = `
             mutation {
               cartTransformCreate(functionId: "${functionId}") {
                 cartTransform {
                   id
                 }
+                userErrors {
+                  field
+                  message
+                }
               }
             }
           `;
-          await client.request(createTransformMutation);
-          console.log("Dynamically registered Cart Transform function on bundle create!");
+          const createTransformRes = await client.request(createTransformMutation);
+          console.log("Cart Transform Registration Response:", JSON.stringify(createTransformRes, null, 2));
         }
       } catch (e: any) {
         console.error("Failed to dynamically check/register Cart Transform:", e.message);
