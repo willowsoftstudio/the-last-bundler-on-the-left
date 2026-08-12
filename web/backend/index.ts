@@ -77,7 +77,7 @@ app.get(
         `);
         console.log("Successfully registered Cart Transform function on install.");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error auto-registering Cart Transform:", e.message);
     }
     next();
@@ -299,6 +299,21 @@ app.post("/api/webhooks", verifyShopifyWebhook, async (req: Request, res: Respon
 
 // Serve beautiful Shopify Polaris embedded App Dashboard
 app.get("/", (req: Request, res: Response) => {
+  const shop = req.query.shop as string;
+  if (shop && shop.endsWith(".myshopify.com")) {
+    const sanitizedShop = encodeURIComponent(shop);
+    res.setHeader(
+      "Content-Security-Policy",
+      `frame-ancestors https://${sanitizedShop} https://admin.shopify.com;`
+    );
+  } else {
+    res.setHeader(
+      "Content-Security-Policy",
+      "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
+    );
+  }
+  res.removeHeader("X-Frame-Options");
+
   res.send(`
 <!DOCTYPE html>
 <html lang="en">
