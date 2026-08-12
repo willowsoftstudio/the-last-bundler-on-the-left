@@ -345,10 +345,10 @@ app.get("/", (req: Request, res: Response) => {
 <body>
   <div id="app"></div>
 
-  <!-- Load React, ReactDOM, and App Bridge v4 CDN -->
+  <!-- Load App Bridge first, then React and ReactDOM -->
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 
   <script>
     const e = React.createElement;
@@ -394,11 +394,18 @@ app.get("/", (req: Request, res: Response) => {
           const selection = await window.shopify.resourcePicker({
             type: "variant",
             multiple: false,
-            action: "select"
+            action: "select",
+            filter: {
+              draft: true,
+              archived: true,
+              hidden: true
+            }
           });
           if (selection && selection.length > 0) {
-            handleComponentChange(index, "variantId", selection[0].id);
-            handleComponentChange(index, "title", selection[0].product.title + " - " + selection[0].title);
+            const variant = selection[0];
+            const titleText = variant.displayName || (variant.product?.title ? `${variant.product.title} - ${variant.title}` : variant.title);
+            handleComponentChange(index, "variantId", variant.id);
+            handleComponentChange(index, "title", titleText);
           }
         } catch (error) {
           console.error("Resource picker error:", error);
