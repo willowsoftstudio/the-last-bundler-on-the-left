@@ -348,7 +348,7 @@ app.get("/", (req: Request, res: Response) => {
   <!-- Load React, ReactDOM, and App Bridge v4 CDN -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://cdn.shopify.com/shopify-app-bridge/v4/app-bridge.js"></script>
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 
   <script>
     const e = React.createElement;
@@ -357,7 +357,7 @@ app.get("/", (req: Request, res: Response) => {
       const [title, setTitle] = React.useState("");
       const [price, setPrice] = React.useState("");
       const [components, setComponents] = React.useState([
-        { variantId: "gid://shopify/ProductVariant/1", quantity: 1 }
+        { variantId: "", quantity: 1, title: "" }
       ]);
       const [bundles, setBundles] = React.useState([]);
       const [analytics, setAnalytics] = React.useState({ totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
@@ -386,7 +386,7 @@ app.get("/", (req: Request, res: Response) => {
       }, []);
 
       const handleAddComponent = () => {
-        setComponents([...components, { variantId: \`gid://shopify/ProductVariant/\${components.length + 1}\`, quantity: 1, title: "" }]);
+        setComponents([...components, { variantId: "", quantity: 1, title: "" }]);
       };
 
       const handleSelectVariant = async (index) => {
@@ -428,7 +428,7 @@ app.get("/", (req: Request, res: Response) => {
           if (res.ok) {
             setTitle("");
             setPrice("");
-            setComponents([{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }]);
+            setComponents([{ variantId: "", quantity: 1, title: "" }]);
             setToastMessage("Bundle created successfully!");
             fetchData();
           } else {
@@ -445,24 +445,24 @@ app.get("/", (req: Request, res: Response) => {
         // Page Header
         e("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" } }, [
           e("div", null, [
-            e("h1", { style: { fontSize: "28px", fontWeight: "bold", margin: 0, color: "#1a1c1d" } }, "📦 Native Cart Transform Bundles"),
-            e("p", { style: { color: "#6d7175", marginTop: "4px" } }, "Build pixel-safe, checkout-integrated product bundles.")
+            e("h1", { style: { fontSize: "28px", fontWeight: "bold", margin: 0, color: "#1a1c1d" } }, "📦 Bundles & Deals"),
+            e("p", { style: { color: "#6d7175", marginTop: "4px" } }, "Combine your products to sell more and delight your customers.")
           ]),
-          e("div", { style: { backgroundColor: "#e2f1eb", color: "#108043", padding: "6px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "600" } }, "Active (Cart Transform)")
+          e("div", { style: { backgroundColor: "#e2f1eb", color: "#108043", padding: "6px 12px", borderRadius: "16px", fontSize: "14px", fontWeight: "600" } }, "Live on Storefront")
         ]),
 
         // Analytics Cards Overview
         e("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "20px", marginBottom: "24px" } }, [
           e("div", { className: "Polaris-Card", style: { padding: "20px", backgroundColor: "#ffffff", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" } }, [
-            e("p", { style: { color: "#6d7175", fontSize: "13px", fontWeight: "500", margin: "0 0 4px 0" } }, "Total Bundle Revenue"),
+            e("p", { style: { color: "#6d7175", fontSize: "13px", fontWeight: "500", margin: "0 0 4px 0" } }, "Extra Money Made"),
             e("h2", { style: { fontSize: "24px", fontWeight: "bold", color: "#108043", margin: 0 } }, \`$\${analytics.totalRevenue.toFixed(2)}\`)
           ]),
           e("div", { className: "Polaris-Card", style: { padding: "20px", backgroundColor: "#ffffff", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" } }, [
-            e("p", { style: { color: "#6d7175", fontSize: "13px", fontWeight: "500", margin: "0 0 4px 0" } }, "Orders with Bundles"),
+            e("p", { style: { color: "#6d7175", fontSize: "13px", fontWeight: "500", margin: "0 0 4px 0" } }, "Orders with Deals"),
             e("h2", { style: { fontSize: "24px", fontWeight: "bold", color: "#202223", margin: 0 } }, analytics.totalOrdersWithBundles)
           ]),
           e("div", { className: "Polaris-Card", style: { padding: "20px", backgroundColor: "#ffffff", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" } }, [
-            e("p", { style: { color: "#6d7175", fontSize: "13px", fontWeight: "500", margin: "0 0 4px 0" } }, "Total Bundles Sold"),
+            e("p", { style: { color: "#6d7175", fontSize: "13px", fontWeight: "500", margin: "0 0 4px 0" } }, "Deals Sold"),
             e("h2", { style: { fontSize: "24px", fontWeight: "bold", color: "#202223", margin: 0 } }, analytics.totalBundlesSold)
           ])
         ]),
@@ -474,14 +474,14 @@ app.get("/", (req: Request, res: Response) => {
           e("div", null, [
             e("form", { onSubmit: handleSubmit }, [
               e("div", { className: "Polaris-Card", style: { padding: "24px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.15)", backgroundColor: "#ffffff" } }, [
-                e("h2", { style: { fontSize: "18px", fontWeight: "600", marginBottom: "16px" } }, "Create a New Bundle"),
+                e("h2", { style: { fontSize: "18px", fontWeight: "600", marginBottom: "16px" } }, "Create a New Deal"),
                 
                 // Form Fields
                 e("div", { style: { marginBottom: "16px" } }, [
-                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "Bundle Title"),
+                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "What should we call this deal?"),
                   e("input", {
                     type: "text",
-                    placeholder: "e.g., Summer Outfit Pack",
+                    placeholder: "e.g., The Ultimate Summer Outfit",
                     value: title,
                     onChange: (ev) => setTitle(ev.target.value),
                     required: true,
@@ -490,7 +490,7 @@ app.get("/", (req: Request, res: Response) => {
                 ]),
 
                 e("div", { style: { marginBottom: "20px" } }, [
-                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "Total Package Price ($)"),
+                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "How much will the customer pay? ($)"),
                   e("input", {
                     type: "number",
                     step: "0.01",
@@ -503,14 +503,14 @@ app.get("/", (req: Request, res: Response) => {
                 ]),
 
                 // Components Dynamic Table
-                e("h3", { style: { fontSize: "15px", fontWeight: "600", marginBottom: "12px", color: "#202223" } }, "Bundle Components"),
+                e("h3", { style: { fontSize: "15px", fontWeight: "600", marginBottom: "12px", color: "#202223" } }, "What's included in this deal?"),
                 components.map((comp, index) => 
                   e("div", { key: index, style: { display: "grid", gridTemplateColumns: "3fr 1fr auto", gap: "10px", marginBottom: "10px", alignItems: "center" } }, [
                     e("button", {
                       type: "button",
                       onClick: () => handleSelectVariant(index),
                       style: { padding: "8px", borderRadius: "6px", border: "1px solid #c9cccf", background: "#fdfdfd", cursor: "pointer", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
-                    }, comp.title ? comp.title : (comp.variantId.includes("ProductVariant/") && comp.variantId.length > 25 ? "..."+comp.variantId.split("ProductVariant/")[1] : "🔍 Select Product Variant")),
+                    }, comp.title ? comp.title : (comp.variantId.includes("ProductVariant/") && comp.variantId.length > 25 ? "..."+comp.variantId.split("ProductVariant/")[1] : "🔍 Choose an item")),
                     e("input", {
                       type: "number",
                       min: "1",
@@ -531,7 +531,7 @@ app.get("/", (req: Request, res: Response) => {
                   type: "button",
                   onClick: handleAddComponent,
                   style: { marginTop: "12px", display: "block", width: "100%", padding: "10px", backgroundColor: "#f1f2f4", color: "#202223", border: "1px solid #c9cccf", borderRadius: "6px", cursor: "pointer", fontWeight: "600" }
-                }, "+ Add Another Variant"),
+                }, "+ Add another item"),
 
                 e("hr", { style: { border: "0", borderTop: "1px solid #e1e3e5", margin: "20px 0" } }),
 
@@ -540,7 +540,7 @@ app.get("/", (req: Request, res: Response) => {
                   type: "submit",
                   disabled: loading,
                   style: { display: "block", width: "100%", padding: "12px", backgroundColor: "#008060", color: "#ffffff", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "16px", fontWeight: "600" }
-                }, loading ? "Syncing with Shopify..." : "Create and Sync Bundle")
+                }, loading ? "Saving to your store..." : "Save and Activate Deal")
               ])
             ])
           ]),
@@ -548,13 +548,13 @@ app.get("/", (req: Request, res: Response) => {
           // Active Bundles List
           e("div", null, [
             e("div", { className: "Polaris-Card", style: { padding: "20px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.15)", backgroundColor: "#ffffff" } }, [
-              e("h2", { style: { fontSize: "16px", fontWeight: "600", marginBottom: "12px" } }, "Active Syncs"),
-              bundles.length === 0 ? e("p", { style: { color: "#6d7175" } }, "No bundles synced yet.") : 
+              e("h2", { style: { fontSize: "16px", fontWeight: "600", marginBottom: "12px" } }, "Your Active Deals"),
+              bundles.length === 0 ? e("p", { style: { color: "#6d7175" } }, "You haven't created any deals yet. Let's make one!") : 
               bundles.map((b) => 
                 e("div", { key: b.id, style: { padding: "12px", border: "1px solid #e1e3e5", borderRadius: "6px", marginBottom: "10px", backgroundColor: "#fafbfb" } }, [
                   e("h4", { style: { fontWeight: "600", color: "#008060", margin: "0 0 4px 0" } }, b.title),
-                  e("p", { style: { fontSize: "12px", margin: "0 0 6px 0", wordBreak: "break-all", color: "#6d7175" } }, "Parent SKU: " + b.parentVariantId),
-                  e("p", { style: { fontSize: "13px", fontWeight: "500", margin: "0 0 2px 0" } }, "Components:"),
+                  e("p", { style: { fontSize: "12px", margin: "0 0 6px 0", wordBreak: "break-all", color: "#6d7175" } }, "Tracking ID: " + b.parentVariantId),
+                  e("p", { style: { fontSize: "13px", fontWeight: "500", margin: "0 0 2px 0" } }, "Includes:"),
                   b.components.map((c, idx) =>
                    e("div", { key: idx, style: { fontSize: "12px", color: "#202223", paddingLeft: "8px" } }, "• " + c.quantity + "x ..." + c.variantId.substring(c.variantId.length - 8))
                   )
