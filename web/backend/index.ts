@@ -357,7 +357,7 @@ app.get("/", (req: Request, res: Response) => {
       const [title, setTitle] = React.useState("");
       const [price, setPrice] = React.useState("");
       const [components, setComponents] = React.useState([
-        { variantId: "", quantity: 1, title: "" }
+        { variantId: "", quantity: 1, title: "", image: "" }
       ]);
       const [bundles, setBundles] = React.useState([]);
       const [analytics, setAnalytics] = React.useState({ totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
@@ -386,7 +386,7 @@ app.get("/", (req: Request, res: Response) => {
       }, []);
 
       const handleAddComponent = () => {
-        setComponents([...components, { variantId: "", quantity: 1, title: "" }]);
+        setComponents([...components, { variantId: "", quantity: 1, title: "", image: "" }]);
       };
 
       const handleSelectVariant = async (index) => {
@@ -407,8 +407,13 @@ app.get("/", (req: Request, res: Response) => {
             const titleText = (!variant.title || variant.title === "Default Title")
               ? product.title
               : (product.title + " - " + variant.title);
+            
+            // Get product image, fallback to variant image, fallback to empty string
+            const imageSrc = product.images?.[0]?.originalSrc || variant.image?.originalSrc || "";
+
             handleComponentChange(index, "variantId", variant.id);
             handleComponentChange(index, "title", titleText);
+            handleComponentChange(index, "image", imageSrc);
           }
         } catch (error) {
           console.error("Resource picker error:", error);
@@ -438,7 +443,7 @@ app.get("/", (req: Request, res: Response) => {
           if (res.ok) {
             setTitle("");
             setPrice("");
-            setComponents([{ variantId: "", quantity: 1, title: "" }]);
+            setComponents([{ variantId: "", quantity: 1, title: "", image: "" }]);
             setToastMessage("Bundle created successfully!");
             fetchData();
           } else {
@@ -515,7 +520,13 @@ app.get("/", (req: Request, res: Response) => {
                 // Components Dynamic Table
                 e("h3", { style: { fontSize: "15px", fontWeight: "600", marginBottom: "12px", color: "#202223" } }, "What's included in this deal?"),
                 components.map((comp, index) => 
-                  e("div", { key: index, style: { display: "grid", gridTemplateColumns: "3fr 1fr auto", gap: "10px", marginBottom: "10px", alignItems: "center" } }, [
+                  e("div", { key: index, style: { display: "grid", gridTemplateColumns: "auto 3fr 1fr auto", gap: "10px", marginBottom: "10px", alignItems: "center" } }, [
+                    // Product image preview (uses Shopify's official default image fallback if none is returned)
+                    e("img", {
+                      src: comp.image || "https://cdn.shopify.com/s/images/admin/no-image-20x20.gif",
+                      alt: "thumbnail",
+                      style: { width: "32px", height: "32px", borderRadius: "4px", border: "1px solid #c9cccf", objectFit: "cover" }
+                    }),
                     e("button", {
                       type: "button",
                       onClick: () => handleSelectVariant(index),
