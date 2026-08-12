@@ -135,47 +135,46 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     const session = res.locals.shopify?.session || { shop: "test-shop.myshopify.com", accessToken: "mock-token" };
     const client = new shopify.api.clients.Graphql({ session });
 
-    // Self-Healing Check: Ensure Cart Transform function is active on this store
-    const functionId = process.env.SHOPIFY_CART_TRANSFORM_ID;
-    if (functionId) {
-      try {
-        const checkTransformsQuery = `
-          query {
-            cartTransforms(first: 10) {
-              edges {
-                node {
-                  id
-                  functionId
-                }
+    // Self-Healing Check: Ensure Cart Transform function is active on this store using modern 'functionHandle'
+    // This allows us to bypass the need for an environment variable completely!
+    try {
+      const checkTransformsQuery = `
+        query {
+          cartTransforms(first: 10) {
+            edges {
+              node {
+                id
+                functionId
+              }
+            }
+          }
+        }
+      `;
+      const checkRes = await client.request(checkTransformsQuery);
+      
+      // If there are no cartTransforms active on the store at all, attempt to register via handle
+      const existingTransforms = (checkRes as any).data?.cartTransforms?.edges || [];
+      if (existingTransforms.length === 0) {
+        console.log("No Cart Transforms registered yet. Attempting registration using functionHandle: 'cart-transform'");
+        const createTransformMutation = `
+          mutation {
+            cartTransformCreate(functionHandle: "cart-transform") {
+              cartTransform {
+                id
+                functionId
+              }
+              userErrors {
+                field
+                message
               }
             }
           }
         `;
-        const checkRes = await client.request(checkTransformsQuery);
-        const existingTransforms = (checkRes as any).data?.cartTransforms?.edges || [];
-        const isRegistered = existingTransforms.some((edge: any) => edge.node.functionId === functionId);
-
-        if (!isRegistered) {
-          console.log("Cart Transform not registered yet. Attempting registration for Function ID:", functionId);
-          const createTransformMutation = `
-            mutation {
-              cartTransformCreate(functionId: "${functionId}") {
-                cartTransform {
-                  id
-                }
-                userErrors {
-                  field
-                  message
-                }
-              }
-            }
-          `;
-          const createTransformRes = await client.request(createTransformMutation);
-          console.log("Cart Transform Registration Response:", JSON.stringify(createTransformRes, null, 2));
-        }
-      } catch (e: any) {
-        console.error("Failed to dynamically check/register Cart Transform:", e.message);
+        const createTransformRes = await client.request(createTransformMutation);
+        console.log("Cart Transform Registration Response:", JSON.stringify(createTransformRes, null, 2));
       }
+    } catch (e: any) {
+      console.error("Failed to dynamically check/register Cart Transform:", e.message);
     }
 
     // Step 1: Create a hidden "Shell Product" representing the parent bundle item.
