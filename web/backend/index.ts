@@ -147,17 +147,22 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
       return res.status(422).json({ error: "Shopify product creation failed", details: productData.userErrors });
     }
 
+    const productId = productData?.product?.id;
     const parentVariantId = productData?.product?.variants?.edges?.[0]?.node?.id;
-    if (!parentVariantId) {
-      return res.status(500).json({ error: "Could not retrieve parent variant ID" });
+    if (!productId || !parentVariantId) {
+      return res.status(500).json({ error: "Could not retrieve parent product or variant ID" });
     }
 
-    // Step 1b: Update the default variant to set its price and disable inventory tracking (Parent Shell)
-    const productVariantUpdateMutation = `
-      mutation productVariantUpdate($input: ProductVariantInput!) {
-        productVariantUpdate(input: $input) {
-          productVariant {
+    // Step 1b: Update the default variant to set its price and disable inventory tracking (Parent Shell) using modern bulk update
+    const productVariantsBulkUpdateMutation = `
+      mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          product {
             id
+          }
+          productVariants {
+            id
+            price
           }
           userErrors {
             field
@@ -167,19 +172,22 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
       }
     `;
 
-    const variantResponse = await client.request(productVariantUpdateMutation, {
+    const variantResponse = await client.request(productVariantsBulkUpdateMutation, {
       variables: {
-        input: {
-          id: parentVariantId,
-          price: price,
-          inventoryItem: {
-            tracked: false
+        productId: productId,
+        variants: [
+          {
+            id: parentVariantId,
+            price: price,
+            inventoryItem: {
+              tracked: false
+            }
           }
-        }
+        ]
       }
     });
 
-    const variantData = (variantResponse as any).data?.productVariantUpdate;
+    const variantData = (variantResponse as any).data?.productVariantsBulkUpdate;
     if (variantData?.userErrors && variantData.userErrors.length > 0) {
       return res.status(422).json({ error: "Shopify variant configuration failed", details: variantData.userErrors });
     }
