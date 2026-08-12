@@ -22,7 +22,8 @@ describe("Cart Transform Function - run() Unit Tests", () => {
           {
             id: "gid://shopify/CartLine/1",
             quantity: 2,
-            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } }
+            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } },
+            cost: { amountPerQuantity: { amount: "10.00" } }
           }
         ]
       },
@@ -80,12 +81,14 @@ describe("Cart Transform Function - run() Unit Tests", () => {
           {
             id: "gid://shopify/CartLine/1",
             quantity: 1, // Requires 2
-            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } }
+            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } },
+            cost: { amountPerQuantity: { amount: "10.00" } }
           },
           {
             id: "gid://shopify/CartLine/2",
             quantity: 1, // Requires 1
-            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } }
+            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } },
+            cost: { amountPerQuantity: { amount: "15.00" } }
           }
         ]
       },
@@ -107,12 +110,14 @@ describe("Cart Transform Function - run() Unit Tests", () => {
           {
             id: "gid://shopify/CartLine/1",
             quantity: 2,
-            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } }
+            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } },
+            cost: { amountPerQuantity: { amount: "10.00" } }
           },
           {
             id: "gid://shopify/CartLine/2",
             quantity: 1,
-            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } }
+            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } },
+            cost: { amountPerQuantity: { amount: "15.00" } }
           }
         ]
       },
@@ -130,7 +135,12 @@ describe("Cart Transform Function - run() Unit Tests", () => {
       cartLines: [
         { cartLineId: "gid://shopify/CartLine/1", quantity: 2 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 1 }
-      ]
+      ],
+      price: {
+        percentageDecrease: {
+          value: 100
+        }
+      }
     });
   });
 
@@ -141,12 +151,14 @@ describe("Cart Transform Function - run() Unit Tests", () => {
           {
             id: "gid://shopify/CartLine/1",
             quantity: 4, // Enough for 2 bundles
-            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } }
+            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } },
+            cost: { amountPerQuantity: { amount: "10.00" } }
           },
           {
             id: "gid://shopify/CartLine/2",
             quantity: 2, // Enough for 2 bundles
-            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } }
+            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } },
+            cost: { amountPerQuantity: { amount: "15.00" } }
           }
         ]
       },
@@ -164,7 +176,12 @@ describe("Cart Transform Function - run() Unit Tests", () => {
       cartLines: [
         { cartLineId: "gid://shopify/CartLine/1", quantity: 4 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 2 }
-      ]
+      ],
+      price: {
+        percentageDecrease: {
+          value: 100
+        }
+      }
     });
   });
 
@@ -175,12 +192,14 @@ describe("Cart Transform Function - run() Unit Tests", () => {
           {
             id: "gid://shopify/CartLine/1",
             quantity: 5, // 5 A's (Requires 2 per bundle -> can form 2 bundles, leaving 1 leftover)
-            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } }
+            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } },
+            cost: { amountPerQuantity: { amount: "10.00" } }
           },
           {
             id: "gid://shopify/CartLine/2",
             quantity: 2, // 2 B's (Requires 1 per bundle -> can form 2 bundles, leaving 0 leftover)
-            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } }
+            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } },
+            cost: { amountPerQuantity: { amount: "15.00" } }
           }
         ]
       },
@@ -198,7 +217,12 @@ describe("Cart Transform Function - run() Unit Tests", () => {
       cartLines: [
         { cartLineId: "gid://shopify/CartLine/1", quantity: 4 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 2 }
-      ]
+      ],
+      price: {
+        percentageDecrease: {
+          value: 100
+        }
+      }
     });
   });
 
@@ -209,17 +233,20 @@ describe("Cart Transform Function - run() Unit Tests", () => {
           {
             id: "gid://shopify/CartLine/1a",
             quantity: 1, // Variant A line 1
-            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } }
+            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } },
+            cost: { amountPerQuantity: { amount: "10.00" } }
           },
           {
             id: "gid://shopify/CartLine/1b",
             quantity: 1, // Variant A line 2 (Total = 2)
-            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } }
+            merchandise: { id: "gid://shopify/ProductVariant/A", title: "Product A", product: { id: "p1", title: "A" } },
+            cost: { amountPerQuantity: { amount: "10.00" } }
           },
           {
             id: "gid://shopify/CartLine/2",
             quantity: 1, // Variant B
-            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } }
+            merchandise: { id: "gid://shopify/ProductVariant/B", title: "Product B", product: { id: "p2", title: "B" } },
+            cost: { amountPerQuantity: { amount: "15.00" } }
           }
         ]
       },

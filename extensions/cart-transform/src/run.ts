@@ -33,6 +33,11 @@ export interface MergeOperation {
   linesMerge: {
     parentVariantId: string;
     cartLines: MergeLineInput[];
+    price?: {
+      percentageDecrease: {
+        value: number;
+      };
+    };
   };
 }
 
@@ -143,7 +148,7 @@ export function run(input: RunInput): RunOutput {
           const consumeQty = Math.min(actualLine.quantity, neededQty);
           linesPayload.push({
             cartLineId: line.id,
-            quantity: consumeQty,
+            quantity: consumeQty, // Revert to mathematically consumed quantities
           });
 
           // Decrement actual cart line quantity in place to prevent double-consumption
@@ -153,10 +158,35 @@ export function run(input: RunInput): RunOutput {
       }
 
       if (linesPayload.length > 0) {
+        // Calculate the sum of the original individual component prices currently in checkout
+        let originalComponentsSum = 0;
+        for (const match of componentMatches) {
+          const matchedLine = match.matchingLines[0];
+          const unitPrice = parseFloat(matchedLine?.cost?.amountPerQuantity?.amount || "0.00");
+          originalComponentsSum += unitPrice * match.component.quantity;
+        }
+
+        // Parse target bundle price
+        const targetBundlePrice = parseFloat(bundle.price || "0.00");
+
+        // Calculate the percentage decrease required to reach the target bundle price
+        let percentageValue = 0;
+        if (originalComponentsSum > targetBundlePrice && originalComponentsSum > 0) {
+          percentageValue = ((originalComponentsSum - targetBundlePrice) / originalComponentsSum) * 100;
+        }
+
+        // Bound check: Ensure percentage is valid (between 0 and 100)
+        percentageValue = Math.min(Math.max(percentageValue, 0), 100);
+
         operations.push({
           linesMerge: {
             parentVariantId: bundle.parentVariantId,
-            cartLines: linesPayload
+            cartLines: linesPayload,
+            price: {
+              percentageDecrease: {
+                value: parseFloat(percentageValue.toFixed(4)) // Precision bounding
+              }
+            }
           },
         });
       }

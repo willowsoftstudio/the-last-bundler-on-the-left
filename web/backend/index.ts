@@ -350,6 +350,14 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
 
     currentBundles.push(newBundleDefinition);
 
+    // Sort bundles so the "Largest" (most components required) are evaluated first by the WASM function
+    // This perfectly solves the "Greedy Match Component Stealing" problem for overlapping deals!
+    currentBundles.sort((a, b) => {
+      const aTotalQty = a.components.reduce((sum: number, comp: any) => sum + (comp.quantity || 1), 0);
+      const bTotalQty = b.components.reduce((sum: number, comp: any) => sum + (comp.quantity || 1), 0);
+      return bTotalQty - aTotalQty; // Descending order (Largest first)
+    });
+
     // Step 3: Write the updated bundle array back to Shopify Metafields
     const setMetafieldMutation = `
       mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
