@@ -96,8 +96,8 @@ app.get("/api/analytics", async (req: Request, res: Response) => {
   return res.json(analytics || { totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
 });
 
-// Express Endpoint to create a bundle
-app.post("/api/bundles", async (req: Request, res: Response) => {
+// Express Endpoint to create a bundle (secured with Shopify's session validation middleware)
+app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
   try {
     const { title, components, price } = req.body;
 
