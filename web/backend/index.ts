@@ -135,6 +135,44 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     const session = res.locals.shopify?.session || { shop: "test-shop.myshopify.com", accessToken: "mock-token" };
     const client = new shopify.api.clients.Graphql({ session });
 
+    // Self-Healing Check: Ensure Cart Transform function is active on this store
+    const functionId = process.env.SHOPIFY_CART_TRANSFORM_ID;
+    if (functionId) {
+      try {
+        const checkTransformsQuery = `
+          query {
+            cartTransforms(first: 10) {
+              edges {
+                node {
+                  id
+                  functionId
+                }
+              }
+            }
+          }
+        `;
+        const checkRes = await client.request(checkTransformsQuery);
+        const existingTransforms = (checkRes as any).data?.cartTransforms?.edges || [];
+        const isRegistered = existingTransforms.some((edge: any) => edge.node.functionId === functionId);
+
+        if (!isRegistered) {
+          const createTransformMutation = `
+            mutation {
+              cartTransformCreate(functionId: "${functionId}") {
+                cartTransform {
+                  id
+                }
+              }
+            }
+          `;
+          await client.request(createTransformMutation);
+          console.log("Dynamically registered Cart Transform function on bundle create!");
+        }
+      } catch (e: any) {
+        console.error("Failed to dynamically check/register Cart Transform:", e.message);
+      }
+    }
+
     // Step 1: Create a hidden "Shell Product" representing the parent bundle item.
     // Candace's Audit: We explicitly disable inventory tracking on the Parent SKU to ensure Shopify delegates inventory decrements down to child components.
     const productCreateMutation = `
@@ -205,6 +243,7 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
           {
             id: parentVariantId,
             price: price,
+            inventoryPolicy: "CONTINUE", // Explicitly allow selling when untracked (prevents "Sold out" on storefront)
             inventoryItem: {
               tracked: false
             }
