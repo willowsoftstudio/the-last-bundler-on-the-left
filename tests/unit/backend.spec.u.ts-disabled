@@ -1,0 +1,277 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import request from "supertest";
+
+// Import the app and the shopify instance under test
+import { app, bundlesDb, analyticsDb } from "../../web/backend/index.js";
+import { shopify } from "../../web/backend/shopify.js";
+
+describe("Shopify Bundle Backend API - Express Router Unit Tests", () => {
+  const mockRequest = vi.fn();
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mockRequest.mockReset();
+
+    // Mutate the shopify API clients dynamically for unit tests, avoiding ESM/CJS mock hoisting errors!
+    shopify.api.clients.Graphql = class {
+      request = mockRequest;
+    } as any;
+
+    // Reset database
+    for (const key of Object.keys(bundlesDb)) {
+      delete bundlesDb[key];
+    }
+
+    // Reset analytics
+    analyticsDb.totalRevenue = 0;
+    analyticsDb.totalOrdersWithBundles = 0;
+    analyticsDb.totalBundlesSold = 0;
+  });
+
+  it("should return 400 Bad Request if mandatory fields are missing during bundle creation", async () => {
+    const response = await request(app)
+      .post("/api/bundles")
+      .send({ title: "Incomplete Bundle" }); // missing components and price
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain("Missing required bundle fields");
+  });
+
+  it("should return 422 Unprocessable Entity if Shopify Product Variant creation returns GraphQL user errors", async () => {
+    // Mock the GraphQL client response for product creation failing
+    mockRequest.mockResolvedValueOnce({
+      data: {
+        productCreate: {
+          product: null,
+          userErrors: [
+            { field: ["title"], message: "Title is too long." }
+          ]
+        }
+      }
+    });
+
+    const response = await request(app)
+      .post("/api/bundles")
+      .send({
+        title: "Bad Bundle",
+        price: "19.99",
+        components: [{ variantId: "gid://shopify/ProductVariant/1", quantity: 1 }]
+      });
+
+    expect(response.status).toBe(422);
+    expect(response.body.error).toBe("Shopify variant creation failed");
+    expect(response.body.details[0].message).toBe("Title is too long.");
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("should return 422 Unprocessable Entity if Shopify Metafield write returns GraphQL user errors", async () => {
+    // 1st request: Success creating the Parent Shell Product
+    mockRequest.mockResolvedValueOnce({
+      data: {
+        productCreate: {
+          product: {
+            id: "gid://shopify/Product/ParentProduct1",
+            variants: {
+              edges: [
+                { node: { id: "gid://shopify/ProductVariant/ParentVariant1" } }
+              ]
+            }
+          },
+          userErrors: []
+        }
+      }
+    });
+
+    // 2nd request: Fetching current active bundles metafield (returns null as none exist yet)
+    mockRequest.mockResolvedValueOnce({
+      data: {
+        shop: {
+          metafield: null
+        }
+      }
+    });
+
+    // 3rd request: Write metafield fails with GraphQL userErrors
+    mockRequest.mockResolvedValueOnce({
+      data: {
+        metafieldsSet: {
+          metafields: null,
+          userErrors: [
+            { field: ["value"], message: "Metafield value is invalid JSON." }
+          ]
+        }
+      }
+    });
+
+    const response = await request(app)
+      .post("/api/bundles")
+      .send({
+        title: "My Bundle",
+        price: "49.99",
+        components: [{ variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 1 }]
+      });
+
+    expect(response.status).toBe(422);
+    expect(response.body.error).toBe("Shopify metafield sync failed");
+    expect(response.body.details[0].message).toBe("Metafield value is invalid JSON.");
+    expect(mockRequest).toHaveBeenCalledTimes(3);
+  });
+
+  it("should create Shell Variant, read existing active bundles, and save combined metafield back to Shopify on Success", async () => {
+    // 1st request: Success creating the Parent Shell Product
+    mockRequest.mockResolvedValueOnce({
+      data: {
+        productCreate: {
+          product: {
+            id: "gid://shopify/Product/ParentProductSuccess",
+            variants: {
+              edges: [
+                { node: { id: "gid://shopify/ProductVariant/ParentVariantSuccess" } }
+              ]
+            }
+          },
+          userErrors: []
+        }
+      }
+    });
+
+    // 2nd request: Fetching current active bundles metafield (returns one existing bundle)
+    const existingBundle = {
+      id: "bundle_existing_123",
+      parentVariantId: "gid://shopify/ProductVariant/ParentExisting",
+      components: [{ variantId: "gid://shopify/ProductVariant/CompExisting", quantity: 3 }]
+    };
+    mockRequest.mockResolvedValueOnce({
+      data: {
+        shop: {
+          metafield: {
+            value: JSON.stringify([existingBundle])
+          }
+        }
+      }
+    });
+
+    // 3rd request: Success writing the updated metafield
+    mockRequest.mockResolvedValueOnce({
+      data: {
+        metafieldsSet: {
+          metafields: [
+            { key: "active_bundles", value: "some-json-string-here" }
+          ],
+          userErrors: []
+        }
+      }
+    });
+
+    const response = await request(app)
+      .post("/api/bundles")
+      .send({
+        title: "Summer Outfit Pack",
+        price: "89.99",
+        components: [
+          { variantId: "gid://shopify/ProductVariant/CompShirt", quantity: 1 },
+          { variantId: "gid://shopify/ProductVariant/CompShorts", quantity: 1 }
+        ]
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.success).toBe(true);
+    expect(response.body.bundle.parentVariantId).toBe("gid://shopify/ProductVariant/ParentVariantSuccess");
+    expect(response.body.bundle.components).toHaveLength(2);
+
+    // Verify database backup has been synchronized
+    const keys = Object.keys(bundlesDb);
+    expect(keys).toHaveLength(1);
+    expect(bundlesDb[keys[0]].parentVariantId).toBe("gid://shopify/ProductVariant/ParentVariantSuccess");
+
+    // Verify all 3 API calls executed
+    expect(mockRequest).toHaveBeenCalledTimes(3);
+
+    // Verify 3rd call set the metafield with both the existing and the new bundle
+    const setMetafieldsArg = mockRequest.mock.calls[2][1].variables.metafields[0];
+    const parsedValue = JSON.parse(setMetafieldsArg.value);
+    expect(parsedValue).toHaveLength(2);
+    expect(parsedValue[0].id).toBe("bundle_existing_123");
+    expect(parsedValue[1].parentVariantId).toBe("gid://shopify/ProductVariant/ParentVariantSuccess");
+  });
+
+  it("should completely clear local database memory backup upon receiving app/uninstalled webhook", async () => {
+    // Populate DB with mock data
+    bundlesDb["bundle_1"] = { id: "bundle_1", parentVariantId: "parent_1" };
+    bundlesDb["bundle_2"] = { id: "bundle_2", parentVariantId: "parent_2" };
+    expect(Object.keys(bundlesDb)).toHaveLength(2);
+
+    const response = await request(app)
+      .post("/api/webhooks")
+      .set("X-Shopify-Topic", "app/uninstalled")
+      .set("X-Shopify-Shop-Domain", "merchant-test-shop.myshopify.com")
+      .send({});
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain("Uninstall webhook processed");
+    // Database backup must be cleared completely
+    expect(Object.keys(bundlesDb)).toHaveLength(0);
+  });
+
+  it("should return 200 and ignore any other unhandled webhook topic", async () => {
+    const response = await request(app)
+      .post("/api/webhooks")
+      .set("X-Shopify-Topic", "products/update")
+      .send({});
+
+    expect(response.status).toBe(200);
+    expect(response.text).toBe("Webhook received");
+  });
+
+  it("should return clean initial stats when calling GET /api/analytics", async () => {
+    const response = await request(app).get("/api/analytics");
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      totalRevenue: 0,
+      totalOrdersWithBundles: 0,
+      totalBundlesSold: 0
+    });
+  });
+
+  it("should track revenue and bundle order counts upon receiving orders/create webhook", async () => {
+    // Populate active bundle database
+    bundlesDb["bundle_summer_999"] = {
+      id: "bundle_summer_999",
+      parentVariantId: "gid://shopify/ProductVariant/888888", // Numeric ID is 888888
+      components: [
+        { variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 1 }
+      ]
+    };
+
+    // Send mock orders/create webhook payload containing our bundle
+    const orderPayload = {
+      line_items: [
+        {
+          variant_id: 888888, // Matches matchingBundle numeric ID
+          price: "49.99",
+          quantity: 2
+        },
+        {
+          variant_id: 111111, // Standard non-bundle product
+          price: "10.00",
+          quantity: 1
+        }
+      ]
+    };
+
+    const response = await request(app)
+      .post("/api/webhooks")
+      .set("X-Shopify-Topic", "orders/create")
+      .send(orderPayload);
+
+    expect(response.status).toBe(200);
+    expect(response.text).toBe("Order webhook processed successfully");
+
+    // Check aggregated analytics metrics
+    const analyticsResponse = await request(app).get("/api/analytics");
+    expect(analyticsResponse.status).toBe(200);
+    expect(analyticsResponse.body.totalRevenue).toBe(99.98); // 49.99 * 2
+    expect(analyticsResponse.body.totalOrdersWithBundles).toBe(1);
+    expect(analyticsResponse.body.totalBundlesSold).toBe(2);
+  });
+});

@@ -1,0 +1,63 @@
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+
+# Build and Compilation outputs
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Shopify CLI local state, logs, and cache
+.shopify/
+.shopify/logs/
+.shopify/dev-bundle/
+.shopify/deploy-bundle/
+
+# Environment and sensitive credential files (Crucial for Security!)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+*.env
+# Ensure we do not ignore the example env file
+!.env.example
+
+# Private certificates, tokens, and keys
+*.pem
+*.key
+*.cert
+*.pfx
+*.p12
+
+# Test and coverage outputs
+coverage/
+.nyc_output/
+htmlcov/
+
+# Local database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3

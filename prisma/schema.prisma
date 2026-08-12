@@ -1,0 +1,40 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+}
+
+model Bundle {
+  id              String   @id @default(uuid())
+  title           String
+  parentVariantId String
+  components      Json     // Array of { variantId: string, quantity: number }
+  createdAt       DateTime @default(now())
+}
+
+model Analytics {
+  id                     String   @id @default("global_analytics")
+  totalRevenue           Float    @default(0.0)
+  totalOrdersWithBundles Int      @default(0)
+  totalBundlesSold       Int      @default(0)
+  updatedAt              DateTime @updatedAt
+}
+
+model SeederMigration {
+  id        String   @id
+  appliedAt DateTime @default(now())
+}

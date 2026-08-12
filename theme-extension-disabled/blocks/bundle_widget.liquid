@@ -1,0 +1,188 @@
+{% comment %}
+  Native Bundle and Quantity Breaks widget block for the product page.
+{% endcomment %}
+
+<div id="bundle-app-widget-container" class="bundle-widget-container" style="display: none;">
+  <h3 class="bundle-widget-title">Bundle & Save</h3>
+  <div id="bundle-offers-list" class="bundle-offers-list"></div>
+  <button id="add-bundle-to-cart-btn" class="bundle-add-to-cart-btn" disabled>
+    Select Bundle Option
+  </button>
+</div>
+
+<style>
+  .bundle-widget-container {
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 20px 0;
+    background-color: #f9f9f9;
+    font-family: inherit;
+  }
+  .bundle-widget-title {
+    font-size: 1.1em;
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .bundle-offers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .bundle-offer-card {
+    border: 2px solid #e1e1e1;
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #fff;
+    transition: all 0.2s ease;
+  }
+  .bundle-offer-card:hover {
+    border-color: #008060;
+  }
+  .bundle-offer-card.selected {
+    border-color: #008060;
+    background-color: #f0fdf4;
+  }
+  .bundle-offer-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .bundle-offer-badge {
+    background-color: #008060;
+    color: #fff;
+    font-size: 0.8em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    align-self: flex-start;
+  }
+  .bundle-offer-title {
+    font-weight: 600;
+  }
+  .bundle-offer-price {
+    font-weight: 600;
+    color: #008060;
+  }
+  .bundle-add-to-cart-btn {
+    width: 100%;
+    padding: 12px;
+    background-color: #008060;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+  .bundle-add-to-cart-btn:hover {
+    background-color: #005e46;
+  }
+  .bundle-add-to-cart-btn:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    const rawBundles = {{ shop.metafields.bundle_app.active_bundles.value | default: '[]' }};
+    const currentVariantId = "{{ product.selected_or_first_available_variant.id }}";
+
+    // Filter bundles where the current variant is a component
+    const matchingBundles = rawBundles.filter(bundle => {
+      return bundle.components.some(comp => {
+        return comp.variantId && comp.variantId.endsWith(currentVariantId);
+      });
+    });
+
+    if (matchingBundles.length === 0) return;
+
+    const container = document.getElementById("bundle-app-widget-container");
+    const list = document.getElementById("bundle-offers-list");
+    const btn = document.getElementById("add-bundle-to-cart-btn");
+    let selectedBundle = null;
+
+    container.style.display = "block";
+
+    matchingBundles.forEach((bundle, index) => {
+      const card = document.createElement("div");
+      card.className = "bundle-offer-card";
+      if (index === 0) {
+        card.classList.add("selected");
+        selectedBundle = bundle;
+        btn.disabled = false;
+        btn.innerText = "Add Bundle to Cart";
+      }
+
+      card.innerHTML = `
+        <div class="bundle-offer-info">
+          <span class="bundle-offer-badge">Bundle Discount</span>
+          <span class="bundle-offer-title">Complete Bundle Deal</span>
+          <span class="bundle-offer-desc">Get these matching items together and save</span>
+        </div>
+        <div class="bundle-offer-price">Special Combo Price</div>
+      `;
+
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".bundle-offer-card").forEach(c => c.classList.remove("selected"));
+        card.classList.add("selected");
+        selectedBundle = bundle;
+        btn.disabled = false;
+        btn.innerText = "Add Bundle to Cart";
+      });
+
+      list.appendChild(card);
+    });
+
+    btn.addEventListener("click", async () => {
+      if (!selectedBundle) return;
+      btn.disabled = true;
+      btn.innerText = "Adding to Cart...";
+
+      try {
+        const items = selectedBundle.components.map(comp => {
+          const numericVariantId = comp.variantId.split("/").pop();
+          return {
+            id: numericVariantId,
+            quantity: comp.quantity
+          };
+        });
+
+        // Add all components to Shopify Cart using AJAX API
+        const response = await fetch("/cart/add.js", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items })
+        });
+
+        if (response.ok) {
+          // Redirect to checkout or refresh cart drawer
+          window.location.href = "/checkout";
+        } else {
+          alert("Could not add bundle to cart. Please try again.");
+          btn.disabled = false;
+          btn.innerText = "Add Bundle to Cart";
+        }
+      } catch (e) {
+        console.error(e);
+        btn.disabled = false;
+        btn.innerText = "Add Bundle to Cart";
+      }
+    });
+  });
+</script>
+
+{% schema %}
+{
+  "name": "Bundle Product Widget",
+  "target": "section",
+  "settings": []
+}
+{% endschema %}

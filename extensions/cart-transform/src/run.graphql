@@ -1,0 +1,28 @@
+query RunInput {
+  cart {
+    lines {
+      id
+      quantity
+      merchandise {
+        ... on ProductVariant {
+          id
+          title
+          sku
+          product {
+            id
+            title
+          }
+        }
+      }
+      attribute(key: "_bundle_id") {
+        value
+      }
+    }
+  }
+  # Read active bundle configuration mapping stored in app metafields
+  shop {
+    bundleMetafields: metafield(namespace: "bundle_app", key: "active_bundles") {
+      value
+    }
+  }
+}

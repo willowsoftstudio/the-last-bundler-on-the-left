@@ -1,0 +1,5 @@
+type = "backend"
+roles = ["backend", "frontend"]
+
+[commands]
+dev = "npx tsx backend/index.ts"
