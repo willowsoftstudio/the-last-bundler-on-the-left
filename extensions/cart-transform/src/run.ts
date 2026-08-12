@@ -33,13 +33,6 @@ export interface MergeOperation {
   linesMerge: {
     parentVariantId: string;
     cartLines: MergeLineInput[];
-    price?: {
-      adjustment: {
-        fixedPricePerUnit: {
-          amount: string;
-        };
-      };
-    };
   };
 }
 
@@ -163,14 +156,7 @@ export function run(input: RunInput): RunOutput {
         operations.push({
           linesMerge: {
             parentVariantId: bundle.parentVariantId,
-            cartLines: linesPayload,
-            price: {
-              adjustment: {
-                fixedPricePerUnit: {
-                  amount: bundle.price || "0.00"
-                }
-              }
-            }
+            cartLines: linesPayload
           },
         });
       }

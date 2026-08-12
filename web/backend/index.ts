@@ -262,6 +262,7 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
           {
             id: parentVariantId,
             price: price,
+            requiresComponents: true, // Absolutely crucial for hidden bundles! Tells Shopify this variant is a bundle container.
             inventoryPolicy: "CONTINUE", // Explicitly allow selling when untracked (prevents "Sold out" on storefront)
             inventoryItem: {
               tracked: false
@@ -875,7 +876,7 @@ app.get("/", (req: Request, res: Response) => {
                   ])
                 ]),
 
-                availablePublications.length > 0 && isVisible && e("div", { style: { marginBottom: "20px" } }, [
+                availablePublications.length > 0 && e("div", { style: { marginBottom: "20px" } }, [
                   e("label", { style: { fontWeight: "500", display: "block", marginBottom: "6px" } }, "Where should we publish this deal?"),
                   e("div", { style: { border: "1px solid #c9cccf", borderRadius: "6px", padding: "10px", maxHeight: "120px", overflowY: "auto", backgroundColor: "#fafbfb" } }, 
                     availablePublications.map((pub) => {

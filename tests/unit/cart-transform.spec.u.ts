@@ -130,14 +130,7 @@ describe("Cart Transform Function - run() Unit Tests", () => {
       cartLines: [
         { cartLineId: "gid://shopify/CartLine/1", quantity: 2 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 1 }
-      ],
-      price: {
-        adjustment: {
-          fixedPricePerUnit: {
-            amount: "0.00"
-          }
-        }
-      }
+      ]
     });
   });
 
@@ -171,14 +164,7 @@ describe("Cart Transform Function - run() Unit Tests", () => {
       cartLines: [
         { cartLineId: "gid://shopify/CartLine/1", quantity: 4 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 2 }
-      ],
-      price: {
-        adjustment: {
-          fixedPricePerUnit: {
-            amount: "0.00"
-          }
-        }
-      }
+      ]
     });
   });
 
@@ -212,14 +198,7 @@ describe("Cart Transform Function - run() Unit Tests", () => {
       cartLines: [
         { cartLineId: "gid://shopify/CartLine/1", quantity: 4 },
         { cartLineId: "gid://shopify/CartLine/2", quantity: 2 }
-      ],
-      price: {
-        adjustment: {
-          fixedPricePerUnit: {
-            amount: "0.00"
-          }
-        }
-      }
+      ]
     });
   });
 
