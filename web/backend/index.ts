@@ -403,7 +403,7 @@ app.get("/", (req: Request, res: Response) => {
           });
           if (selection && selection.length > 0) {
             const variant = selection[0];
-            const titleText = variant.displayName || (variant.product?.title ? `${variant.product.title} - ${variant.title}` : variant.title);
+            const titleText = variant.displayName || (variant.product?.title ? (variant.product.title + " - " + variant.title) : variant.title);
             handleComponentChange(index, "variantId", variant.id);
             handleComponentChange(index, "title", titleText);
           }
