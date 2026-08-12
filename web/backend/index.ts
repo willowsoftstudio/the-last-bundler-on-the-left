@@ -112,8 +112,8 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     // Step 1: Create a hidden "Shell Product" representing the parent bundle item.
     // Candace's Audit: We explicitly disable inventory tracking on the Parent SKU to ensure Shopify delegates inventory decrements down to child components.
     const productCreateMutation = `
-      mutation productCreate($input: ProductInput!) {
-        productCreate(input: $input) {
+      mutation productCreate($product: ProductCreateInput!) {
+        productCreate(product: $product) {
           product {
             id
             variants(first: 1) {
@@ -134,31 +134,54 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
 
     const productResponse = await client.request(productCreateMutation, {
       variables: {
-        input: {
+        product: {
           title: `${title} (Bundle Parent)`,
           productType: "Bundle Parent",
-          status: "ACTIVE",
-          variants: [
-            {
-              price: price,
-              inventoryItem: {
-                // Set track as false to make it a parent shell variant (inventory is handled by components)
-                tracked: false
-              }
-            }
-          ]
+          status: "ACTIVE"
         }
       }
     });
 
     const productData = (productResponse as any).data?.productCreate;
     if (productData?.userErrors && productData.userErrors.length > 0) {
-      return res.status(422).json({ error: "Shopify variant creation failed", details: productData.userErrors });
+      return res.status(422).json({ error: "Shopify product creation failed", details: productData.userErrors });
     }
 
     const parentVariantId = productData?.product?.variants?.edges?.[0]?.node?.id;
     if (!parentVariantId) {
       return res.status(500).json({ error: "Could not retrieve parent variant ID" });
+    }
+
+    // Step 1b: Update the default variant to set its price and disable inventory tracking (Parent Shell)
+    const productVariantUpdateMutation = `
+      mutation productVariantUpdate($input: ProductVariantInput!) {
+        productVariantUpdate(input: $input) {
+          productVariant {
+            id
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const variantResponse = await client.request(productVariantUpdateMutation, {
+      variables: {
+        input: {
+          id: parentVariantId,
+          price: price,
+          inventoryItem: {
+            tracked: false
+          }
+        }
+      }
+    });
+
+    const variantData = (variantResponse as any).data?.productVariantUpdate;
+    if (variantData?.userErrors && variantData.userErrors.length > 0) {
+      return res.status(422).json({ error: "Shopify variant configuration failed", details: variantData.userErrors });
     }
 
     // Step 2: Fetch current active bundles metafield to append the new definition
