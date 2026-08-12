@@ -214,9 +214,11 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
           namespace: "seo",
           key: "hidden",
           type: "integer",
-          value: "1"
+          value: "1" // Note: Although it's an integer type, the GraphQL API requires the value to be passed as a string representation of the integer
         }
       ];
+      // Additionally set status to UNLISTED if possible, but ACTIVE is required for checkout.
+      // We will ensure it is not published to any sales channels.
     }
 
     const mediaPayload: any[] = [];
@@ -884,7 +886,7 @@ app.get("/", (req: Request, res: Response) => {
                   ])
                 ]),
 
-                availablePublications.length > 0 && e("div", { style: { marginBottom: "20px" } }, [
+                availablePublications.length > 0 && isVisible && e("div", { style: { marginBottom: "20px" } }, [
                   e("label", { style: { fontWeight: "500", display: "block", marginBottom: "6px" } }, "Where should we publish this deal?"),
                   e("div", { style: { border: "1px solid #c9cccf", borderRadius: "6px", padding: "10px", maxHeight: "120px", overflowY: "auto", backgroundColor: "#fafbfb" } }, 
                     availablePublications.map((pub) => {
