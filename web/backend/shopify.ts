@@ -1,10 +1,19 @@
 // Bulletproof mapping of Vercel/Neon Postgres env vars to the DATABASE_URL expected by Prisma
-if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL =
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.PRISMA_DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_URL_NON_POOLING;
+// Surgically forces the schema query parameter to 'the_last_bundler' to isolate this app's tables from others!
+let rawDatabaseUrl = process.env.DATABASE_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  process.env.PRISMA_DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_URL_NON_POOLING;
+
+if (rawDatabaseUrl) {
+  try {
+    const parsedUrl = new URL(rawDatabaseUrl);
+    parsedUrl.searchParams.set("schema", "the_last_bundler");
+    process.env.DATABASE_URL = parsedUrl.toString();
+  } catch (e) {
+    process.env.DATABASE_URL = rawDatabaseUrl;
+  }
 }
 
 import { shopifyApp } from "@shopify/shopify-app-express";
