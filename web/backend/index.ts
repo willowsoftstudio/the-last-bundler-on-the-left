@@ -320,6 +320,7 @@ app.get("/", (req: Request, res: Response) => {
 <head>
   <meta charset="UTF-8">
   <title>Bundle & Volume Discounts Admin</title>
+  <meta name="shopify-api-key" content="${process.env.SHOPIFY_API_KEY}" />
   <!-- Load Shopify Polaris CSS for official merchant look & feel -->
   <link rel="stylesheet" href="https://unpkg.com/@shopify/polaris@12.0.0/build/esm/styles.css">
   <style>
