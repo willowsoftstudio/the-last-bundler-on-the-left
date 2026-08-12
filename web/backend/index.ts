@@ -523,7 +523,7 @@ app.get("/", (req: Request, res: Response) => {
                   e("div", { key: index, style: { display: "grid", gridTemplateColumns: "auto 3fr 1fr auto", gap: "10px", marginBottom: "10px", alignItems: "center" } }, [
                     // Product image preview (uses Shopify's official default image fallback if none is returned)
                     e("img", {
-                      src: comp.image || "https://cdn.shopify.com/s/images/admin/no-image-20x20.gif",
+                      src: comp.image || "https://cdn.shopify.com/s/assets/no-image-2048-5e88c1b20e087fb7bbe9a3771824e743c244f437e4f8ba93bbf7b11b53f7824c.gif",
                       alt: "thumbnail",
                       style: { width: "32px", height: "32px", borderRadius: "4px", border: "1px solid #c9cccf", objectFit: "cover" }
                     }),
