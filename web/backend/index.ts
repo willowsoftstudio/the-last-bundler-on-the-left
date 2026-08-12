@@ -203,22 +203,11 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     const productPayload: any = {
       title: title,
       productType: "Bundle",
-      status: status || "ACTIVE"
+      status: isVisible ? (status || "ACTIVE") : "UNLISTED"
     };
 
-    if (isVisible) {
-      if (description) productPayload.descriptionHtml = description;
-    } else {
-      productPayload.metafields = [
-        {
-          namespace: "seo",
-          key: "hidden",
-          type: "integer",
-          value: "1" // Note: Although it's an integer type, the GraphQL API requires the value to be passed as a string representation of the integer
-        }
-      ];
-      // Additionally set status to UNLISTED if possible, but ACTIVE is required for checkout.
-      // We will ensure it is not published to any sales channels.
+    if (isVisible && description) {
+      productPayload.descriptionHtml = description;
     }
 
     const mediaPayload: any[] = [];
