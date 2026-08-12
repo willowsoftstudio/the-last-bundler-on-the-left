@@ -61,3 +61,5 @@ htmlcov/
 *.db-journal
 *.sqlite
 *.sqlite3
+.vercel
+.env*
