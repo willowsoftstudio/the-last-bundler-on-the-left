@@ -2,7 +2,7 @@
 
 client_id = "fd439d2ea8a6fdb778bedf67edd91541"
 name = "The Last Bundler On The Left"
-application_url = "https://the-last-bundler-on-git-932c72-willowsoftstudio-5437s-projects.vercel.app"
+application_url = "https://the-last-bundler-on-the-left-q32x8aen4.vercel.app"
 embedded = true
 
 [build]
@@ -16,4 +16,8 @@ api_version = "2026-10"
 scopes = "write_products,read_products,write_cart_transforms,read_cart_transforms"
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [
+  "https://the-last-bundler-on-the-left-q32x8aen4.vercel.app/api/auth/callback",
+  "https://the-last-bundler-on-git-932c72-willowsoftstudio-5437s-projects.vercel.app/api/auth/callback",
+  "https://the-last-bundler-on-the-left.vercel.app/api/auth/callback"
+]
