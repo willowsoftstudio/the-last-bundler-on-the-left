@@ -96,10 +96,36 @@ app.get("/api/analytics", async (req: Request, res: Response) => {
   return res.json(analytics || { totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
 });
 
+// GET endpoint to retrieve active sales channels (publications) from Shopify
+app.get("/api/publications", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
+  try {
+    const session = res.locals.shopify?.session;
+    if (!session) {
+      return res.status(401).send("Unauthorized");
+    }
+    const client = new shopify.api.clients.Graphql({ session });
+    const response = await client.request(`
+      query GetPublications {
+        publications(first: 20, catalogType: APP) {
+          nodes {
+            id
+            name
+          }
+        }
+      }
+    `);
+    const nodes = (response as any).data?.publications?.nodes || [];
+    return res.json(nodes);
+  } catch (e: any) {
+    console.error("Failed to fetch publications from Shopify:", e.message);
+    return res.status(500).json({ error: "Failed to fetch sales channels" });
+  }
+});
+
 // Express Endpoint to create a bundle (secured with Shopify's session validation middleware)
 app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
   try {
-    const { title, components, price } = req.body;
+    const { title, components, price, status, publications } = req.body;
 
     if (!title || !components || components.length === 0 || !price) {
       return res.status(400).json({ error: "Missing required bundle fields" });
@@ -135,9 +161,9 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     const productResponse = await client.request(productCreateMutation, {
       variables: {
         product: {
-          title: `${title} (Bundle Parent)`,
-          productType: "Bundle Parent",
-          status: "ACTIVE"
+          title: title,
+          productType: "Bundle",
+          status: status || "ACTIVE"
         }
       }
     });
@@ -192,6 +218,39 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
       return res.status(422).json({ error: "Shopify variant configuration failed", details: variantData.userErrors });
     }
 
+    // Step 1c: If any sales channels were selected, publish the product to them
+    if (publications && publications.length > 0) {
+      const publishMutation = `
+        mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
+          publishablePublish(id: $id, input: $input) {
+            publishable {
+              ... on Product {
+                id
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+      
+      const publishInput = publications.map((pubId: string) => ({ publicationId: pubId }));
+      const publishResponse = await client.request(publishMutation, {
+        variables: {
+          id: productId,
+          input: publishInput
+        }
+      });
+
+      const publishData = (publishResponse as any).data?.publishablePublish;
+      if (publishData?.userErrors && publishData.userErrors.length > 0) {
+        console.error("Publishing product failed:", publishData.userErrors);
+        // Note: We don't fail the whole request because the bundle product is already created successfully.
+      }
+    }
+
     // Step 2: Fetch current active bundles metafield to append the new definition (and get the Shop's GID)
     const getMetafieldQuery = `
       query getMetafield {
@@ -223,7 +282,8 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
       parentVariantId,
       components: components.map((c: any) => ({
         variantId: c.variantId,
-        quantity: parseInt(c.quantity, 10) || 1
+        quantity: parseInt(c.quantity, 10) || 1,
+        title: c.title || ""
       }))
     };
 
@@ -397,6 +457,9 @@ app.get("/", (req: Request, res: Response) => {
       const [analytics, setAnalytics] = React.useState({ totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
       const [loading, setLoading] = React.useState(false);
       const [toastMessage, setToastMessage] = React.useState(null);
+      const [status, setStatus] = React.useState("ACTIVE");
+      const [availablePublications, setAvailablePublications] = React.useState([]);
+      const [selectedPubs, setSelectedPubs] = React.useState([]);
 
       // Fetch active bundles from server
       const fetchData = async () => {
@@ -408,6 +471,12 @@ app.get("/", (req: Request, res: Response) => {
           const resAnalytics = await fetch("/api/analytics");
           const analyticsData = await resAnalytics.json();
           setAnalytics(analyticsData);
+
+          const resPubs = await fetch("/api/publications");
+          if (resPubs.ok) {
+            const pubsData = await resPubs.json();
+            setAvailablePublications(pubsData);
+          }
         } catch (err) {
           console.error("Failed to fetch data:", err);
         }
@@ -471,13 +540,15 @@ app.get("/", (req: Request, res: Response) => {
           const res = await fetch("/api/bundles", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, price, components })
+            body: JSON.stringify({ title, price, components, status, publications: selectedPubs })
           });
           const data = await res.json();
           if (res.ok) {
             setTitle("");
             setPrice("");
             setComponents([{ variantId: "", quantity: 1, title: "", image: "" }]);
+            setStatus("ACTIVE");
+            setSelectedPubs([]);
             setToastMessage("Bundle created successfully!");
             fetchData();
           } else {
@@ -551,6 +622,42 @@ app.get("/", (req: Request, res: Response) => {
                   })
                 ]),
 
+                e("div", { style: { marginBottom: "20px" } }, [
+                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "Deal Status"),
+                  e("select", {
+                    value: status,
+                    onChange: (ev) => setStatus(ev.target.value),
+                    style: { width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #c9cccf", fontSize: "15px", backgroundColor: "#ffffff" }
+                  }, [
+                    e("option", { value: "ACTIVE" }, "Active (Ready to Sell)"),
+                    e("option", { value: "DRAFT" }, "Draft (Hidden/Setup Mode)")
+                  ])
+                ]),
+
+                availablePublications.length > 0 && e("div", { style: { marginBottom: "20px" } }, [
+                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "6px" } }, "Where should we publish this deal?"),
+                  e("div", { style: { border: "1px solid #c9cccf", borderRadius: "6px", padding: "10px", maxHeight: "120px", overflowY: "auto", backgroundColor: "#fafbfb" } }, 
+                    availablePublications.map((pub) => {
+                      const isChecked = selectedPubs.includes(pub.id);
+                      return e("label", { key: pub.id, style: { display: "flex", alignItems: "center", marginBottom: "8px", cursor: "pointer", fontSize: "14px" } }, [
+                        e("input", {
+                          type: "checkbox",
+                          checked: isChecked,
+                          onChange: () => {
+                            if (isChecked) {
+                              setSelectedPubs(selectedPubs.filter(id => id !== pub.id));
+                            } else {
+                              setSelectedPubs([...selectedPubs, pub.id]);
+                            }
+                          },
+                          style: { marginRight: "8px" }
+                        }),
+                        pub.name
+                      ]);
+                    })
+                  )
+                ]),
+
                 // Components Dynamic Table
                 e("h3", { style: { fontSize: "15px", fontWeight: "600", marginBottom: "12px", color: "#202223" } }, "What's included in this deal?"),
                 components.map((comp, index) => 
@@ -611,7 +718,7 @@ app.get("/", (req: Request, res: Response) => {
                   e("p", { style: { fontSize: "12px", margin: "0 0 6px 0", wordBreak: "break-all", color: "#6d7175" } }, "Tracking ID: " + b.parentVariantId),
                   e("p", { style: { fontSize: "13px", fontWeight: "500", margin: "0 0 2px 0" } }, "Includes:"),
                   b.components.map((c, idx) =>
-                   e("div", { key: idx, style: { fontSize: "12px", color: "#202223", paddingLeft: "8px" } }, "• " + c.quantity + "x ..." + c.variantId.substring(c.variantId.length - 8))
+                   e("div", { key: idx, style: { fontSize: "12px", color: "#202223", paddingLeft: "8px" } }, "• " + c.quantity + "x " + (c.title || ("..." + c.variantId.substring(c.variantId.length - 8))))
                   )
                 ])
               )

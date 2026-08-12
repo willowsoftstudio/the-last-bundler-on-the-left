@@ -33,7 +33,7 @@ export const shopify = shopifyApp({
     apiVersion: LATEST_API_VERSION,
     apiKey: process.env.SHOPIFY_API_KEY || "mock-api-key",
     apiSecretKey: process.env.SHOPIFY_API_SECRET || "mock-secret-key",
-    scopes: process.env.SCOPES ? process.env.SCOPES.split(",") : ["write_products", "read_products", "write_cart_transforms", "read_cart_transforms"],
+    scopes: process.env.SCOPES ? process.env.SCOPES.split(",") : ["write_products", "read_products", "write_cart_transforms", "read_cart_transforms", "write_publications", "read_publications"],
     hostName: resolvedHostName,
     hostScheme: resolvedHostName.includes("localhost") ? "http" : "https",
     isEmbeddedApp: true,
