@@ -203,7 +203,10 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     const productPayload: any = {
       title: title,
       productType: "Bundle",
-      status: isVisible ? (status || "ACTIVE") : "UNLISTED"
+      status: isVisible ? (status || "ACTIVE") : "UNLISTED",
+      claimOwnership: {
+        bundles: true
+      }
     };
 
     if (isVisible && description) {

@@ -10,6 +10,7 @@ describe("Cart Transform Function - run() Unit Tests", () => {
   const mockActiveBundles: BundleDefinition[] = [
     {
       id: "bundle-1",
+      title: "Mock Bundle 1",
       parentVariantId: "gid://shopify/ProductVariant/ParentBundle1",
       components: mockComponents
     }
@@ -271,6 +272,7 @@ describe("Cart Transform Function - run() Unit Tests", () => {
     const mixAndMatchBundles: BundleDefinition[] = [
       {
         id: "bundle-mix-and-match",
+        title: "Mix Match Bundle",
         parentVariantId: "gid://shopify/ProductVariant/MixMatchParent",
         components: [
           {
@@ -319,6 +321,7 @@ describe("Cart Transform Function - run() Unit Tests", () => {
     const mixAndMatchBundles: BundleDefinition[] = [
       {
         id: "bundle-mix-and-match-scaled",
+        title: "Scaled Mix Match Bundle",
         parentVariantId: "gid://shopify/ProductVariant/MixMatchParent",
         components: [
           {

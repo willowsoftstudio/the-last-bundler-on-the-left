@@ -3,6 +3,11 @@ export interface RunInput {
     lines: Array<{
       id: string;
       quantity: number;
+      cost?: {
+        amountPerQuantity: {
+          amount: string;
+        };
+      } | null;
       merchandise: {
         id: string;
         title: string;
