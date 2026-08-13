@@ -394,7 +394,15 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
     }
 
     // Save copy in app database
-    await prisma.bundle.create({ data: { id: newBundleId, title, parentVariantId, components: components } });
+    await prisma.bundle.create({
+      data: {
+        id: newBundleId,
+        title,
+        parentVariantId,
+        components: components,
+        salesChannels: publications || []
+      }
+    });
 
     return res.status(201).json({
       success: true,

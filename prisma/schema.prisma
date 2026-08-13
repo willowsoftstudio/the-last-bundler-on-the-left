@@ -32,6 +32,7 @@ model Bundle {
   title           String
   parentVariantId String
   components      Json     // Array of { variantId: string, quantity: number }
+  salesChannels   Json?    // Array of string identifiers or publication objects
   createdAt       DateTime @default(now())
 }
 
