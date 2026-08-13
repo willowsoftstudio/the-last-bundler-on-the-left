@@ -122,6 +122,77 @@ app.get("/api/publications", shopify.validateAuthenticatedSession(), async (req:
   }
 });
 
+// GET endpoint to retrieve detailed analytics, recent orders, and component inventory for a single bundle
+app.get("/api/bundles/:id/analytics", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const session = res.locals.shopify?.session;
+    if (!session) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    // 1. Fetch running analytics from our database
+    const dbAnalytics = await prisma.bundleAnalytics.findUnique({
+      where: { bundleId: id }
+    }) || { totalRevenue: 0.0, totalUnitsSold: 0, totalOrders: 0, totalDiscounts: 0.0 };
+
+    // 2. Fetch the top 5 most recent orders for this bundle
+    const recentOrders = await prisma.bundleOrder.findMany({
+      where: { bundleId: id },
+      orderBy: { purchasedAt: "desc" },
+      take: 5
+    });
+
+    // 3. Fetch the bundle info to get component variant IDs for inventory checking
+    const bundle = await prisma.bundle.findUnique({
+      where: { id }
+    });
+
+    let componentInventory: any[] = [];
+    if (bundle && bundle.components) {
+      try {
+        const client = new shopify.api.clients.Graphql({ session });
+        const componentIds = (bundle.components as any[]).flatMap((c: any) => c.variantId ? [c.variantId] : (c.validVariantIds || []));
+        
+        // Fetch inventory quantity and title for each component
+        const query = `
+          query getInventory($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on ProductVariant {
+                id
+                title
+                inventoryQuantity
+                product {
+                  title
+                }
+              }
+            }
+          }
+        `;
+        const shopifyRes = await client.request(query, { variables: { ids: componentIds } });
+        const nodes = (shopifyRes as any).data?.nodes || [];
+        
+        componentInventory = nodes.filter(Boolean).map((node: any) => ({
+          id: node.id,
+          title: node.product.title + (node.title && node.title !== "Default Title" ? ` - ${node.title}` : ""),
+          inventory: node.inventoryQuantity
+        }));
+      } catch (err: any) {
+        console.error("Failed to query inventory from Shopify:", err.message);
+      }
+    }
+
+    return res.json({
+      analytics: dbAnalytics,
+      recentOrders,
+      inventory: componentInventory
+    });
+  } catch (error: any) {
+    console.error("Failed to fetch bundle analytics:", error.message);
+    return res.status(500).json({ error: "Failed to load stats" });
+  }
+});
+
 // Express Endpoint to create a bundle (secured with Shopify's session validation middleware)
 app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
   try {
@@ -566,8 +637,81 @@ app.post("/api/webhooks", verifyShopifyWebhook, async (req: Request, res: Respon
           hasBundle = true;
           const price = parseFloat(item.price) || 0;
           const qty = parseInt(item.quantity, 10) || 0;
-          orderRevenue += price * qty;
+          const bundleRevenue = price * qty;
+          orderRevenue += bundleRevenue;
           orderBundlesCount += qty;
+
+          // Compute discount/savings dynamically by fetching standard prices via GraphQL
+          let originalComponentsSum = 0;
+          try {
+            const offlineSessionId = shopify.api.session.getOfflineId(shop);
+            const session = await shopify.config.sessionStorage.loadSession(offlineSessionId);
+            if (session) {
+              const client = new shopify.api.clients.Graphql({ session });
+              const componentIds = (matchingBundle.components as any[]).flatMap((c: any) =>
+                c.variantId ? [c.variantId] : (c.validVariantIds || [])
+              );
+              
+              const query = `
+                query getPrices($ids: [ID!]!) {
+                  nodes(ids: $ids) {
+                    ... on ProductVariant {
+                      id
+                      price
+                    }
+                  }
+                }
+              `;
+              const resNode = await client.request(query, { variables: { ids: componentIds } });
+              const nodes = (resNode as any).data?.nodes || [];
+              const priceMap = new Map<string, number>();
+              for (const node of nodes) {
+                if (node) priceMap.set(node.id, parseFloat(node.price) || 0);
+              }
+              for (const comp of matchingBundle.components as any[]) {
+                if (comp.variantId) {
+                  originalComponentsSum += (priceMap.get(comp.variantId) || 0) * (comp.quantity || 1);
+                } else if (comp.validVariantIds && comp.validVariantIds.length > 0) {
+                  originalComponentsSum += (priceMap.get(comp.validVariantIds[0]) || 0) * (comp.quantity || 1);
+                }
+              }
+            }
+          } catch (err: any) {
+            console.error("Failed to fetch component prices for discount calculation:", err.message);
+          }
+
+          const discountAmount = Math.max(0, (originalComponentsSum - price) * qty);
+
+          // Write record to BundleOrder
+          await prisma.bundleOrder.create({
+            data: {
+              bundleId: matchingBundle.id,
+              orderId: String(order.id),
+              customerName: order.customer ? `${order.customer.first_name || ""} ${order.customer.last_name || ""}`.trim() : "Guest Customer",
+              customerEmail: order.customer?.email || "N/A",
+              quantity: qty,
+              revenue: bundleRevenue,
+              discountAmount: discountAmount
+            }
+          });
+
+          // Upsert running stats to BundleAnalytics
+          await prisma.bundleAnalytics.upsert({
+            where: { bundleId: matchingBundle.id },
+            create: {
+              bundleId: matchingBundle.id,
+              totalRevenue: bundleRevenue,
+              totalUnitsSold: qty,
+              totalOrders: 1,
+              totalDiscounts: discountAmount
+            },
+            update: {
+              totalRevenue: { increment: bundleRevenue },
+              totalUnitsSold: { increment: qty },
+              totalOrders: { increment: 1 },
+              totalDiscounts: { increment: discountAmount }
+            }
+          });
         }
       }
     }
@@ -685,6 +829,33 @@ app.get("/", (req: Request, res: Response) => {
         const interval = setInterval(fetchData, 5000); // Poll every 5s
         return () => clearInterval(interval);
       }, []);
+
+      const [expandedBundleId, setExpandedBundleId] = React.useState(null);
+      const [bundleDetails, setBundleDetails] = React.useState(null);
+      const [loadingDetails, setLoadingDetails] = React.useState(false);
+
+      const handleToggleExpand = async (id) => {
+        if (expandedBundleId === id) {
+          setExpandedBundleId(null);
+          setBundleDetails(null);
+          return;
+        }
+        setExpandedBundleId(id);
+        setLoadingDetails(true);
+        try {
+          const res = await fetch(\`/api/bundles/\${id}/analytics\`);
+          if (res.ok) {
+            const data = await res.json();
+            setBundleDetails(data);
+          } else {
+            console.error("Failed to fetch detailed analytics");
+          }
+        } catch (err) {
+          console.error("Network error fetching analytics:", err);
+        } finally {
+          setLoadingDetails(false);
+        }
+      };
 
       const handleAddComponent = () => {
         setComponents([...components, { variantId: "", quantity: 1, title: "", image: "" }]);
@@ -973,8 +1144,24 @@ app.get("/", (req: Request, res: Response) => {
             e("div", { className: "Polaris-Card", style: { padding: "20px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.15)", backgroundColor: "#ffffff" } }, [
               e("h2", { style: { fontSize: "16px", fontWeight: "600", marginBottom: "12px" } }, "Your Active Deals"),
               bundles.length === 0 ? e("p", { style: { color: "#6d7175" } }, "You haven't created any deals yet. Let's make one!") : 
-              bundles.map((b) => 
-                e("div", { key: b.id, style: { padding: "12px", border: "1px solid #e1e3e5", borderRadius: "6px", marginBottom: "10px", backgroundColor: "#fafbfb" } }, [
+              bundles.map((b) => {
+                const isExpanded = expandedBundleId === b.id;
+                return e("div", {
+                  key: b.id,
+                  onClick: (ev) => {
+                    if (ev.target.tagName === "BUTTON") return;
+                    handleToggleExpand(b.id);
+                  },
+                  style: {
+                    padding: "16px",
+                    border: isExpanded ? "2px solid #008060" : "1px solid #e1e3e5",
+                    borderRadius: "6px",
+                    marginBottom: "10px",
+                    backgroundColor: "#fafbfb",
+                    cursor: "pointer",
+                    transition: "all 0.2s ease"
+                  }
+                }, [
                   // Header Row with Title & Delete Button
                   e("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" } }, [
                     e("h4", { style: { fontWeight: "600", color: "#008060", margin: 0 } }, b.title),
@@ -984,13 +1171,84 @@ app.get("/", (req: Request, res: Response) => {
                       style: { background: "none", border: "none", color: "#bf0711", cursor: "pointer", fontSize: "12px", fontWeight: "600", padding: 0 }
                     }, "Delete")
                   ]),
-                  e("p", { style: { fontSize: "12px", margin: "0 0 6px 0", wordBreak: "break-all", color: "#6d7175" } }, "Tracking ID: " + b.parentVariantId),
                   e("p", { style: { fontSize: "13px", fontWeight: "500", margin: "0 0 2px 0" } }, "Includes:"),
                   b.components.map((c, idx) =>
                    e("div", { key: idx, style: { fontSize: "12px", color: "#202223", paddingLeft: "8px" } }, "• " + c.quantity + "x " + (c.title || ("..." + c.variantId.substring(c.variantId.length - 8))))
-                  )
-                ])
-              )
+                  ),
+                  
+                  // Expanded analytics section
+                  isExpanded && e("div", {
+                    style: {
+                      marginTop: "16px",
+                      paddingTop: "16px",
+                      borderTop: "1px solid #e1e3e5",
+                      cursor: "default"
+                    },
+                    onClick: (ev) => ev.stopPropagation()
+                  }, [
+                    loadingDetails ? e("p", { style: { color: "#6d7175", fontSize: "12px", fontStyle: "italic" } }, "Loading statistics...") :
+                    bundleDetails ? e("div", null, [
+                      e("h5", { style: { fontWeight: "600", margin: "0 0 10px 0", fontSize: "13px" } }, "Performance Analytics"),
+                      
+                      // Stat Cards Grid
+                      e("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" } }, [
+                        e("div", { style: { padding: "8px", backgroundColor: "#f1f2f4", borderRadius: "4px" } }, [
+                          e("p", { style: { fontSize: "11px", color: "#6d7175", margin: "0 0 2px 0" } }, "Revenue"),
+                          e("h4", { style: { fontSize: "14px", fontWeight: "bold", margin: 0 } }, "$" + (bundleDetails.analytics?.totalRevenue || 0).toFixed(2))
+                        ]),
+                        e("div", { style: { padding: "8px", backgroundColor: "#f1f2f4", borderRadius: "4px" } }, [
+                          e("p", { style: { fontSize: "11px", color: "#6d7175", margin: "0 0 2px 0" } }, "Deals Sold"),
+                          e("h4", { style: { fontSize: "14px", fontWeight: "bold", margin: 0 } }, bundleDetails.analytics?.totalUnitsSold || 0)
+                        ]),
+                        e("div", { style: { padding: "8px", backgroundColor: "#f1f2f4", borderRadius: "4px" } }, [
+                          e("p", { style: { fontSize: "11px", color: "#6d7175", margin: "0 0 2px 0" } }, "Total Orders"),
+                          e("h4", { style: { fontSize: "14px", fontWeight: "bold", margin: 0 } }, bundleDetails.analytics?.totalOrders || 0)
+                        ]),
+                        e("div", { style: { padding: "8px", backgroundColor: "#f1f2f4", borderRadius: "4px" } }, [
+                          e("p", { style: { fontSize: "11px", color: "#6d7175", margin: "0 0 2px 0" } }, "Customer Savings"),
+                          e("h4", { style: { fontSize: "14px", fontWeight: "bold", color: "#108043", margin: 0 } }, "$" + (bundleDetails.analytics?.totalDiscounts || 0).toFixed(2))
+                        ])
+                      ]),
+
+                      // Inventory Health Tracker
+                      bundleDetails.inventory && bundleDetails.inventory.length > 0 && e("div", { style: { marginBottom: "12px" } }, [
+                        e("h5", { style: { fontWeight: "600", margin: "0 0 6px 0", fontSize: "13px" } }, "Component Stock Levels"),
+                        bundleDetails.inventory.map((inv, idx) => {
+                          const isLow = inv.inventory <= 5;
+                          return e("div", { key: idx, style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", padding: "4px 0" } }, [
+                            e("span", { style: { color: "#202223", maxWidth: "70%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, inv.title),
+                            e("span", { style: { fontWeight: "bold", color: isLow ? "#bf0711" : "#108043" } }, 
+                              isLow ? "⚠️ Low stock (" + inv.inventory + ")" : "🟢 " + inv.inventory + " in stock"
+                            )
+                          ]);
+                        })
+                      ]),
+
+                      // Customer Transactions table
+                      bundleDetails.recentOrders && bundleDetails.recentOrders.length > 0 && e("div", null, [
+                        e("h5", { style: { fontWeight: "600", margin: "0 0 6px 0", fontSize: "13px" } }, "Recent Buyers"),
+                        e("div", { style: { border: "1px solid #e1e3e5", borderRadius: "4px", backgroundColor: "#ffffff" } }, [
+                          bundleDetails.recentOrders.map((ord, idx) =>
+                            e("div", {
+                              key: idx,
+                              style: {
+                                padding: "6px 8px",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                fontSize: "11px",
+                                borderBottom: idx < bundleDetails.recentOrders.length - 1 ? "1px solid #e1e3e5" : "none"
+                              }
+                            }, [
+                              e("span", { style: { fontWeight: "500" } }, ord.customerName || "Guest"),
+                              e("span", { style: { color: "#6d7175" } }, ord.customerEmail)
+                            ])
+                          )
+                        ])
+                      ])
+                    ]) : e("p", { style: { color: "#6d7175", fontSize: "12px", fontStyle: "italic" } }, "No transaction data recorded for this bundle yet.")
+                  ])
+                ]);
+              })
             ])
           ])
         ]),

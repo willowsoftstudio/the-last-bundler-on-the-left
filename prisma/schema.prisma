@@ -28,12 +28,42 @@ model Session {
 }
 
 model Bundle {
-  id              String   @id @default(uuid())
+  id              String           @id @default(uuid())
   title           String
   parentVariantId String
-  components      Json     // Array of { variantId: string, quantity: number }
-  salesChannels   Json?    // Array of string identifiers or publication objects
-  createdAt       DateTime @default(now())
+  components      Json             // Array of { variantId: string, quantity: number }
+  salesChannels   Json?            // Array of string identifiers or publication objects
+  createdAt       DateTime         @default(now())
+  analytics       BundleAnalytics?
+  orders          BundleOrder[]
+}
+
+model BundleAnalytics {
+  bundleId       String   @id
+  totalRevenue   Float    @default(0.0)
+  totalUnitsSold Int      @default(0)
+  totalOrders    Int      @default(0)
+  totalDiscounts Float    @default(0.0)
+  updatedAt      DateTime @updatedAt
+
+  bundle         Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+}
+
+model BundleOrder {
+  id             String   @id @default(uuid())
+  bundleId       String
+  orderId        String   // Shopify Order ID
+  customerName   String?
+  customerEmail  String?
+  quantity       Int
+  revenue        Float
+  discountAmount Float
+  purchasedAt    DateTime @default(now())
+
+  bundle         Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  
+  @@index([bundleId])
+  @@index([orderId])
 }
 
 model Analytics {
