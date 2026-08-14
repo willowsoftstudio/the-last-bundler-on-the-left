@@ -38,6 +38,24 @@ test.describe("Shopify Bundle App — Premium Billing and Paywall E2E Tests", ()
         isPremium: true
       }
     });
+
+    // Create a mock bundle in DB for status update testing
+    await prisma.bundle.upsert({
+      where: { id: "test-bundle-id" },
+      create: {
+        id: "test-bundle-id",
+        title: "Test Bundle",
+        parentVariantId: "gid://shopify/ProductVariant/Parent123",
+        status: "ACTIVE",
+        price: "19.99",
+        components: [
+          { variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 1 }
+        ]
+      },
+      update: {
+        status: "ACTIVE"
+      }
+    });
   });
 
   test.beforeEach(async ({ page }) => {
@@ -174,5 +192,27 @@ test.describe("Shopify Bundle App — Premium Billing and Paywall E2E Tests", ()
     expect(body.success).toBeTruthy();
     expect(body.profitMargin).toBe(0.45);
     expect(body.abTests.priceB.conversions).toBe(25);
+  });
+
+  test("should allow updating an existing bundle's status (ACTIVE/DRAFT) using PATCH", async ({ page }) => {
+    // Send PATCH to change status to DRAFT
+    const patchResponse = await page.request.patch("http://localhost:3000/api/bundles/test-bundle-id", {
+      headers: {
+        "x-test-session-id": premiumSessionId,
+        "content-type": "application/json"
+      },
+      data: {
+        status: "DRAFT"
+      }
+    });
+
+    expect(patchResponse.status()).toBe(200);
+    const patchBody = await patchResponse.json();
+    expect(patchBody.success).toBeTruthy();
+    expect(patchBody.bundle.status).toBe("DRAFT");
+
+    // Query DB directly to verify the status indeed changed to DRAFT in Postgres
+    const dbBundle = await prisma.bundle.findUnique({ where: { id: "test-bundle-id" } });
+    expect(dbBundle?.status).toBe("DRAFT");
   });
 });

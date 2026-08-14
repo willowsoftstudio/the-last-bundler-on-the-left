@@ -365,4 +365,45 @@ describe("Cart Transform Function - run() Unit Tests", () => {
       { cartLineId: "gid://shopify/CartLine/Blue", quantity: 1 }  // Consumes 1 Blue to reach 6 total items (2 bundles)
     ]);
   });
+
+  it("should skip merging if limitOne is true and the parent variant is already in the cart (preventing recursive double-merging)", () => {
+    const limitedBundles: BundleDefinition[] = [
+      {
+        id: "bundle-limited",
+        title: "Test Limited Bundle",
+        parentVariantId: "gid://shopify/ProductVariant/ParentBundle1",
+        limitOne: true, // Quantity capping enabled!
+        components: [
+          { variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 1 }
+        ]
+      }
+    ];
+
+    const input: RunInput = {
+      cart: {
+        lines: [
+          {
+            id: "gid://shopify/CartLine/Component",
+            quantity: 1,
+            merchandise: { id: "gid://shopify/ProductVariant/ComponentA", title: "Component Product", product: { id: "p1", title: "Comp" } }
+          },
+          {
+            id: "gid://shopify/CartLine/ParentInCart",
+            quantity: 1,
+            // The parent variant is ALREADY in the cart from a previous merge!
+            merchandise: { id: "gid://shopify/ProductVariant/ParentBundle1", title: "Parent Product", product: { id: "pParent", title: "Parent" } }
+          }
+        ]
+      },
+      shop: {
+        bundleMetafields: {
+          value: JSON.stringify(limitedBundles)
+        }
+      }
+    };
+
+    const output = run(input);
+    // Should output empty operations because the parent variant is already in the cart and limitOne is true!
+    expect(output.operations).toHaveLength(0);
+  });
 });
