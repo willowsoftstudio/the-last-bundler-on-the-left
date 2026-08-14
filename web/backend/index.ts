@@ -106,79 +106,93 @@ app.get("/api/bundles", validateSession(), async (req: Request, res: Response) =
   try {
     const session = res.locals.shopify?.session;
     const bundles = await prisma.bundle.findMany();
-    if (bundles.length === 0) {
-      return res.json([]);
-    }
 
-    // Perform self-healing variant existence check (strictly in non-test mode)
+    // Perform self-healing variant existence check directly on the Shopify Metafield (Source of Truth)
     if (process.env.NODE_ENV !== "test" && session) {
       try {
         const client = new shopify.api.clients.Graphql({ session });
-        const parentIds = bundles.map((b: any) => b.parentVariantId);
         
-        const query = `
-          query checkVariants($ids: [ID!]!) {
-            nodes(ids: $ids) {
+        // Fetch current active bundles directly from Shopify's Metafield
+        const getMetafieldQuery = `
+          query {
+            shop {
               id
+              metafield(namespace: "bundle_app", key: "active_bundles") {
+                value
+              }
             }
           }
         `;
-        const response = await client.request(query, { variables: { ids: parentIds } });
-        const nodes = (response as any).data?.nodes || [];
-        const existingIds = new Set(nodes.filter(Boolean).map((n: any) => n.id));
+        const mfRes = await client.request(getMetafieldQuery);
+        const shopId = (mfRes as any).data?.shop?.id;
+        const existingMetafieldVal = (mfRes as any).data?.shop?.metafield?.value;
 
-        const deadBundles = bundles.filter((b: any) => !existingIds.has(b.parentVariantId));
-        if (deadBundles.length > 0) {
-          console.warn(`[Self-Healing] Found ${deadBundles.length} bundles with deleted parent variants. Purging them...`);
-          for (const dead of deadBundles) {
-            // Purge from DB
-            await prisma.bundle.delete({ where: { id: dead.id } });
-            await prisma.bundleAnalytics.deleteMany({ where: { bundleId: dead.id } });
-            await prisma.bundleOrder.deleteMany({ where: { bundleId: dead.id } });
+        if (existingMetafieldVal) {
+          let mfBundles: any[] = [];
+          try {
+            mfBundles = JSON.parse(existingMetafieldVal);
+          } catch (e) {
+            mfBundles = [];
           }
 
-          // Sync back to Shopify Metafields
-          const updatedBundles = await prisma.bundle.findMany();
-          const getMetafieldQuery = `
-            query {
-              shop {
-                id
-              }
-            }
-          `;
-          const mfRes = await client.request(getMetafieldQuery);
-          const shopId = (mfRes as any).data?.shop?.id;
-
-          const setMetafieldMutation = `
-            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-              metafieldsSet(metafields: $metafields) {
-                userErrors {
-                  field
-                  message
+          if (mfBundles.length > 0) {
+            const parentIds = mfBundles.map((b: any) => b.parentVariantId);
+            
+            // Single, ultra-efficient GraphQL node check
+            const query = `
+              query checkVariants($ids: [ID!]!) {
+                nodes(ids: $ids) {
+                  id
                 }
               }
-            }
-          `;
-          await client.request(setMetafieldMutation, {
-            variables: {
-              metafields: [
-                {
-                  ownerId: shopId,
-                  namespace: "bundle_app",
-                  key: "active_bundles",
-                  value: JSON.stringify(updatedBundles.map((b: any) => ({
-                    id: b.id,
-                    title: b.title,
-                    parentVariantId: b.parentVariantId,
-                    components: b.components
-                  }))),
-                  type: "json"
-                }
-              ]
-            }
-          });
+            `;
+            const checkRes = await client.request(query, { variables: { ids: parentIds } });
+            const nodes = (checkRes as any).data?.nodes || [];
+            const existingIds = new Set(nodes.filter(Boolean).map((n: any) => n.id));
 
-          return res.json(updatedBundles);
+            const deadMfBundles = mfBundles.filter((b: any) => !existingIds.has(b.parentVariantId));
+            if (deadMfBundles.length > 0) {
+              console.warn(`[Self-Healing] Found ${deadMfBundles.length} orphaned/deleted bundles inside Shopify Metafields. Purging them...`);
+              
+              const aliveMfBundles = mfBundles.filter((b: any) => existingIds.has(b.parentVariantId));
+
+              // Purge dead ones from our local database too (if they exist there)
+              for (const dead of deadMfBundles) {
+                await prisma.bundle.deleteMany({ where: { parentVariantId: dead.parentVariantId } });
+                await prisma.bundleAnalytics.deleteMany({ where: { bundleId: dead.id } });
+                await prisma.bundleOrder.deleteMany({ where: { bundleId: dead.id } });
+              }
+
+              // Update Shopify's Metafields with the clean, alive-only list
+              const setMetafieldMutation = `
+                mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+                  metafieldsSet(metafields: $metafields) {
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }
+              `;
+              await client.request(setMetafieldMutation, {
+                variables: {
+                  metafields: [
+                    {
+                      ownerId: shopId,
+                      namespace: "bundle_app",
+                      key: "active_bundles",
+                      value: JSON.stringify(aliveMfBundles),
+                      type: "json"
+                    }
+                  ]
+                }
+              });
+
+              // Return the clean database bundle list matching the clean state
+              const updatedBundles = await prisma.bundle.findMany();
+              return res.json(updatedBundles);
+            }
+          }
         }
       } catch (shErr: any) {
         console.error("[Self-Healing Error] Failed to run variant existence check:", shErr.message);
