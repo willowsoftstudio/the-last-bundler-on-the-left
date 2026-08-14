@@ -55,6 +55,7 @@ export interface BundleDefinition {
   title: string;
   price?: string; // Stored as a string with exactly 2 decimal places e.g. "29.99"
   parentVariantId: string; // e.g. "gid://shopify/ProductVariant/Parent"
+  limitOne?: boolean; // Caps the maximum number of bundles formed to exactly 1 per checkout
   components: Array<{
     variantId?: string; // e.g. "gid://shopify/ProductVariant/A"
     validVariantIds?: string[]; // e.g. ["gid://shopify/ProductVariant/A", "gid://shopify/ProductVariant/B"]
@@ -94,6 +95,16 @@ export function run(input: RunInput): RunOutput {
 
   // Iterate over each active bundle configuration to see if it can be formed
   for (const bundle of activeBundles) {
+    // If limitOne is enabled, check if the parent variant is already present in the cart lines (from a previous merge run)
+    if (bundle.limitOne) {
+      const isParentAlreadyInCart = cartLines.some(
+        (line) => line.merchandise.id === bundle.parentVariantId
+      );
+      if (isParentAlreadyInCart) {
+        continue; // Skip merging any further components for this deal!
+      }
+    }
+
     const componentMatches: Array<{
       component: typeof bundle.components[0];
       matchingLines: typeof cartLines;
@@ -134,9 +145,14 @@ export function run(input: RunInput): RunOutput {
     }
 
     // Calculate how many bundles can be formed
-    const totalBundlesCreated = Math.min(
+    let totalBundlesCreated = Math.min(
       ...componentMatches.map((m) => Math.floor(m.totalAvailableQty / m.component.quantity))
     );
+
+    // Limit bundle creation to exactly 1 if limitOne constraint is enabled to prevent price doubling issues
+    if (bundle.limitOne && totalBundlesCreated > 1) {
+      totalBundlesCreated = 1;
+    }
 
     if (totalBundlesCreated > 0) {
       const linesPayload: MergeLineInput[] = [];

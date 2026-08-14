@@ -663,33 +663,51 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
       }
     `;
 
-    const getMetafieldResponse = await client.request(getMetafieldQuery);
-    const shopId = (getMetafieldResponse as any).data?.shop?.id;
-    const existingMetafieldVal = (getMetafieldResponse as any).data?.shop?.metafield?.value;
-    let currentBundles: any[] = [];
-    if (existingMetafieldVal) {
-      try {
-        currentBundles = JSON.parse(existingMetafieldVal);
-      } catch (e) {
-        currentBundles = [];
-      }
-    }
-
     const newBundleId = `bundle_${Date.now()}`;
     const formattedPrice = parseFloat(price).toFixed(2);
-    const newBundleDefinition = {
-      id: newBundleId,
-      title,
-      price: formattedPrice,
-      parentVariantId,
-      components: components.map((c: any) => ({
+
+    // Save copy in app database first (storing status, price, and components!)
+    await prisma.bundle.create({
+      data: {
+        id: newBundleId,
+        title,
+        parentVariantId,
+        price: formattedPrice,
+        status: status || "ACTIVE",
+        components: components,
+        salesChannels: publications || []
+      }
+    });
+
+    // Step 2: Fetch current active GID to write the metafield (ownerId)
+    const getMetafieldQuery = `
+      query getMetafield {
+        shop {
+          id
+        }
+      }
+    `;
+
+    const getMetafieldResponse = await client.request(getMetafieldQuery);
+    const shopId = (getMetafieldResponse as any).data?.shop?.id;
+
+    // Step 3: Query ALL active bundles from our database to write exactly those active deals to Shopify's metafields
+    const activeBundles = await prisma.bundle.findMany({
+      where: { status: "ACTIVE" }
+    });
+
+    const currentBundles = activeBundles.map((b: any) => ({
+      id: b.id,
+      title: b.title,
+      price: b.price || "0.00",
+      parentVariantId: b.parentVariantId,
+      limitOne: true, // Automatically enforce maximum of 1 bundle per order to prevent checkout price-doubling
+      components: (b.components as any[]).map((c: any) => ({
         variantId: c.variantId,
         quantity: parseInt(c.quantity, 10) || 1,
         title: c.title || ""
       }))
-    };
-
-    currentBundles.push(newBundleDefinition);
+    }));
 
     // Sort bundles so the "Largest" (most components required) are evaluated first by the WASM function
     // This perfectly solves the "Greedy Match Component Stealing" problem for overlapping deals!
@@ -699,14 +717,9 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
       return bTotalQty - aTotalQty; // Descending order (Largest first)
     });
 
-    // Step 3: Write the updated bundle array back to Shopify Metafields
     const setMetafieldMutation = `
       mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
         metafieldsSet(metafields: $metafields) {
-          metafields {
-            key
-            value
-          }
           userErrors {
             field
             message
@@ -734,16 +747,18 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
       return res.status(422).json({ error: "Shopify metafield sync failed", details: setMetafieldData.userErrors });
     }
 
-    // Save copy in app database
-    await prisma.bundle.create({
-      data: {
-        id: newBundleId,
-        title,
-        parentVariantId,
-        components: components,
-        salesChannels: publications || []
-      }
-    });
+    const newBundleDefinition = {
+      id: newBundleId,
+      title,
+      price: formattedPrice,
+      parentVariantId,
+      limitOne: true,
+      components: components.map((c: any) => ({
+        variantId: c.variantId,
+        quantity: parseInt(c.quantity, 10) || 1,
+        title: c.title || ""
+      }))
+    };
 
     return res.status(201).json({
       success: true,
@@ -755,8 +770,98 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
   }
 });
 
+// PATCH endpoint to update an existing bundle's status (ACTIVE / DRAFT)
+app.patch("/api/bundles/:id", validateSession(), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const session = res.locals.shopify?.session;
+    if (!session) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    // 1. Update the bundle's status in the local database
+    const updatedBundle = await prisma.bundle.update({
+      where: { id },
+      data: { status }
+    });
+
+    const client = new shopify.api.clients.Graphql({ session });
+
+    // 2. Fetch the shop ID
+    const getMetafieldQuery = `
+      query {
+        shop {
+          id
+        }
+      }
+    `;
+    const getMetafieldResponse = await client.request(getMetafieldQuery);
+    const shopId = (getMetafieldResponse as any).data?.shop?.id;
+
+    // 3. Query all ACTIVE bundles from the database to sync with Shopify metafields
+    const activeBundles = await prisma.bundle.findMany({
+      where: { status: "ACTIVE" }
+    });
+
+    const currentBundles = activeBundles.map((b: any) => ({
+      id: b.id,
+      title: b.title,
+      price: b.price || "0.00",
+      parentVariantId: b.parentVariantId,
+      limitOne: true,
+      components: (b.components as any[]).map((c: any) => ({
+        variantId: c.variantId,
+        quantity: parseInt(c.quantity, 10) || 1,
+        title: c.title || ""
+      }))
+    }));
+
+    // Sort bundles
+    currentBundles.sort((a, b) => {
+      const aTotalQty = a.components.reduce((sum: number, comp: any) => sum + (comp.quantity || 1), 0);
+      const bTotalQty = b.components.reduce((sum: number, comp: any) => sum + (comp.quantity || 1), 0);
+      return bTotalQty - aTotalQty;
+    });
+
+    const setMetafieldMutation = `
+      mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+    const metafieldSetResponse = await client.request(setMetafieldMutation, {
+      variables: {
+        metafields: [
+          {
+            ownerId: shopId,
+            namespace: "bundle_app",
+            key: "active_bundles",
+            value: JSON.stringify(currentBundles),
+            type: "json"
+          }
+        ]
+      }
+    });
+
+    const setMetafieldData = (metafieldSetResponse as any).data?.metafieldsSet;
+    if (setMetafieldData?.userErrors && setMetafieldData.userErrors.length > 0) {
+      return res.status(422).json({ error: "Shopify metafield sync failed", details: setMetafieldData.userErrors });
+    }
+
+    return res.json({ success: true, bundle: updatedBundle });
+  } catch (error: any) {
+    console.error("[API Error] Failed to update bundle status:", error.message);
+    return res.status(500).json({ error: error.message || "An unexpected error occurred" });
+  }
+});
+
 // DELETE endpoint to securely delete a bundle from the database, metafields, and Shopify catalog
-app.delete("/api/bundles/:id", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
+app.delete("/api/bundles/:id", validateSession(), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const session = res.locals.shopify?.session;
@@ -812,56 +917,71 @@ app.delete("/api/bundles/:id", shopify.validateAuthenticatedSession(), async (re
       }
     }
 
-    // 3. Update active_bundles Metafields by removing this bundle
+    // 3. Delete the bundle from the local PostgreSQL database
+    await prisma.bundle.delete({ where: { id } });
+
+    // 4. Update active_bundles Metafields by syncing remaining ACTIVE-only bundles
     try {
       const getMetafieldQuery = `
         query getMetafield {
           shop {
             id
-            metafield(namespace: "bundle_app", key: "active_bundles") {
-              value
-            }
           }
         }
       `;
       const getMetafieldResponse = await client.request(getMetafieldQuery);
       const shopId = (getMetafieldResponse as any).data?.shop?.id;
-      const existingMetafieldVal = (getMetafieldResponse as any).data?.shop?.metafield?.value;
 
-      if (existingMetafieldVal) {
-        let currentBundles = JSON.parse(existingMetafieldVal);
-        currentBundles = currentBundles.filter((b: any) => b.id !== id);
+      const remainingActiveBundles = await prisma.bundle.findMany({
+        where: { status: "ACTIVE" }
+      });
 
-        const setMetafieldMutation = `
-          mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
-            metafieldsSet(metafields: $metafields) {
-              userErrors {
-                field
-                message
-              }
+      const currentBundles = remainingActiveBundles.map((b: any) => ({
+        id: b.id,
+        title: b.title,
+        price: b.price || "0.00",
+        parentVariantId: b.parentVariantId,
+        limitOne: true,
+        components: (b.components as any[]).map((c: any) => ({
+          variantId: c.variantId,
+          quantity: parseInt(c.quantity, 10) || 1,
+          title: c.title || ""
+        }))
+      }));
+
+      // Sort remaining active bundles
+      currentBundles.sort((a, b) => {
+        const aTotalQty = a.components.reduce((sum: number, comp: any) => sum + (comp.quantity || 1), 0);
+        const bTotalQty = b.components.reduce((sum: number, comp: any) => sum + (comp.quantity || 1), 0);
+        return bTotalQty - aTotalQty;
+      });
+
+      const setMetafieldMutation = `
+        mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            userErrors {
+              field
+              message
             }
           }
-        `;
-        await client.request(setMetafieldMutation, {
-          variables: {
-            metafields: [
-              {
-                ownerId: shopId,
-                namespace: "bundle_app",
-                key: "active_bundles",
-                value: JSON.stringify(currentBundles),
-                type: "json"
-              }
-            ]
-          }
-        });
-      }
+        }
+      `;
+      await client.request(setMetafieldMutation, {
+        variables: {
+          metafields: [
+            {
+              ownerId: shopId,
+              namespace: "bundle_app",
+              key: "active_bundles",
+              value: JSON.stringify(currentBundles),
+              type: "json"
+            }
+          ]
+        }
+      });
     } catch (e: any) {
       console.error("Failed to sync deleted bundle back to Metafields:", e.message);
     }
-
-    // 4. Delete the bundle from the local PostgreSQL database
-    await prisma.bundle.delete({ where: { id } });
 
     return res.json({ success: true, message: "Bundle deleted successfully" });
   } catch (error: any) {
