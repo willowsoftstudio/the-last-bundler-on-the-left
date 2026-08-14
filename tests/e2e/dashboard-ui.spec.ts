@@ -1,25 +1,43 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Shopify Bundle App — Dashboard UI E2E Tests (Mocked API)", () => {
+  let mockBundlesList = [
+    {
+      id: "bundle-1",
+      title: "Summer outfit deal",
+      parentVariantId: "gid://shopify/ProductVariant/Parent123",
+      components: [
+        { variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 2, title: "Summer Tee" },
+        { variantId: "gid://shopify/ProductVariant/ComponentB", quantity: 1, title: "Summer Shorts" }
+      ],
+      salesChannels: ["gid://shopify/Publication/1"],
+      status: "ACTIVE"
+    }
+  ];
+
   test.beforeEach(async ({ page }) => {
     // 1. Intercept GET /api/bundles to return mock bundles list
     await page.route("**/api/bundles", async (route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([
-          {
-            id: "bundle-1",
-            title: "Summer outfit deal",
-            parentVariantId: "gid://shopify/ProductVariant/Parent123",
-            components: [
-              { variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 2, title: "Summer Tee" },
-              { variantId: "gid://shopify/ProductVariant/ComponentB", quantity: 1, title: "Summer Shorts" }
-            ],
-            salesChannels: ["gid://shopify/Publication/1"]
-          }
-        ])
+        body: JSON.stringify(mockBundlesList)
       });
+    });
+
+    // Intercept PATCH /api/bundles/bundle-1 to update the status in mockBundlesList
+    await page.route("**/api/bundles/bundle-1", async (route) => {
+      if (route.request().method() === "PATCH") {
+        const payload = JSON.parse(route.request().postData() || "{}");
+        mockBundlesList[0].status = payload.status;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, bundle: mockBundlesList[0] })
+        });
+      } else {
+        await route.fallback();
+      }
     });
 
     // 2. Intercept GET /api/analytics to return mock global analytics
@@ -260,5 +278,33 @@ test.describe("Shopify Bundle App — Dashboard UI E2E Tests (Mocked API)", () =
     // Asserting Online Store Publication GID is included, and Shop App Publication GID is excluded!
     expect(capturedPayload.publications).toContain("gid://shopify/Publication/1");
     expect(capturedPayload.publications).not.toContain("gid://shopify/Publication/2");
+  });
+
+  test("should allow toggling active status of a bundle via the Deactivate/Activate button in the UI", async ({ page }) => {
+    await page.goto("/?shop=test-store.myshopify.com");
+
+    // 1. Initially, verify it has an "Active" badge and "Deactivate" action button
+    const statusBadge = page.locator('span:has-text("Active")');
+    await expect(statusBadge).toBeVisible();
+
+    const deactivateButton = page.locator('button:has-text("Deactivate")');
+    await expect(deactivateButton).toBeVisible();
+
+    // 2. Click "Deactivate"
+    await deactivateButton.click();
+
+    // 3. Verify it transitions to "Draft" badge and "Activate" action button
+    const draftBadge = page.locator('span:has-text("Draft")');
+    await expect(draftBadge).toBeVisible();
+
+    const activateButton = page.getByRole("button", { name: "Activate", exact: true });
+    await expect(activateButton).toBeVisible();
+
+    // 4. Click "Activate" to toggle it back on
+    await activateButton.click();
+
+    // 5. Verify it transitions back to "Active"
+    await expect(statusBadge).toBeVisible();
+    await expect(deactivateButton).toBeVisible();
   });
 });

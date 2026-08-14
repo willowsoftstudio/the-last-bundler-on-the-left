@@ -1410,6 +1410,28 @@ app.get("/", (req: Request, res: Response) => {
         }
       };
 
+      const handleToggleStatus = async (id, currentStatus) => {
+        setLoading(true);
+        const newStatus = currentStatus === "ACTIVE" ? "DRAFT" : "ACTIVE";
+        try {
+          const res = await fetch("/api/bundles/" + id, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: newStatus })
+          });
+          if (res.ok) {
+            setToastMessage("Deal set to " + (newStatus === "ACTIVE" ? "Active" : "Draft") + " successfully!");
+            fetchData();
+          } else {
+            alert("Error changing status.");
+          }
+        } catch (err) {
+          alert("Network error changing status.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
       return e("div", { style: { maxWidth: "1100px", margin: "0 auto" } }, [
         // Page Header
         e("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" } }, [
@@ -1617,14 +1639,34 @@ app.get("/", (req: Request, res: Response) => {
                     transition: "all 0.2s ease"
                   }
                 }, [
-                  // Header Row with Title & Delete Button
+                  // Header Row with Title, Badge, & Actions
                   e("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "4px" } }, [
-                    e("h4", { style: { fontWeight: "600", color: "#008060", margin: 0 } }, b.title),
-                    e("button", {
-                      onClick: () => handleDeleteBundle(b.id),
-                      disabled: loading,
-                      style: { background: "none", border: "none", color: "#bf0711", cursor: "pointer", fontSize: "12px", fontWeight: "600", padding: 0 }
-                    }, "Delete")
+                    e("div", { style: { display: "flex", alignItems: "center", gap: "8px" } }, [
+                      e("h4", { style: { fontWeight: "600", color: "#008060", margin: 0 } }, b.title),
+                      e("span", {
+                        style: {
+                          fontSize: "11px",
+                          fontWeight: "500",
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          backgroundColor: b.status === "ACTIVE" ? "#e6ffec" : "#f1f2f4",
+                          color: b.status === "ACTIVE" ? "#108043" : "#5c5f62",
+                          border: b.status === "ACTIVE" ? "1px solid #10804340" : "1px solid #c9cccf"
+                        }
+                      }, b.status === "ACTIVE" ? "Active" : "Draft")
+                    ]),
+                    e("div", { style: { display: "flex", gap: "10px" } }, [
+                      e("button", {
+                        onClick: () => handleToggleStatus(b.id, b.status),
+                        disabled: loading,
+                        style: { background: "none", border: "none", color: b.status === "ACTIVE" ? "#5c5f62" : "#008060", cursor: "pointer", fontSize: "12px", fontWeight: "600", padding: 0 }
+                      }, b.status === "ACTIVE" ? "Deactivate" : "Activate"),
+                      e("button", {
+                        onClick: () => handleDeleteBundle(b.id),
+                        disabled: loading,
+                        style: { background: "none", border: "none", color: "#bf0711", cursor: "pointer", fontSize: "12px", fontWeight: "600", padding: 0 }
+                      }, "Delete")
+                    ])
                   ]),
                   e("p", { style: { fontSize: "13px", fontWeight: "500", margin: "0 0 2px 0" } }, "Includes:"),
                   b.components.map((c, idx) =>
