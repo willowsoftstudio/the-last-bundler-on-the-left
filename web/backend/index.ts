@@ -208,7 +208,7 @@ app.get("/api/publications", validateSession(), async (req: Request, res: Respon
     const client = new shopify.api.clients.Graphql({ session });
     const response = await client.request(`
       query GetPublications {
-        publications(first: 20, catalogType: APP) {
+        publications(first: 20) {
           nodes {
             id
             name
@@ -217,7 +217,16 @@ app.get("/api/publications", validateSession(), async (req: Request, res: Respon
       }
     `);
     const nodes = (response as any).data?.publications?.nodes || [];
-    return res.json(nodes);
+    
+    // Exclude sales channels that do not support Cart Transform (e.g., POS, Facebook, Instagram, TikTok, etc.)
+    const unsupportedKeywords = ["pos", "point of sale", "facebook", "instagram", "google", "pinterest", "inbox", "tiktok"];
+    const filteredNodes = nodes.filter((node: any) => {
+      if (!node || !node.name) return false;
+      const lowerName = node.name.toLowerCase();
+      return !unsupportedKeywords.some(keyword => lowerName.includes(keyword));
+    });
+
+    return res.json(filteredNodes);
   } catch (e: any) {
     console.error("Failed to fetch publications from Shopify:", e.message);
     return res.status(500).json({ error: "Failed to fetch sales channels" });
@@ -575,8 +584,28 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
       return res.status(422).json({ error: "Shopify variant configuration failed", details: variantData.userErrors });
     }
 
-    // Step 1c: If any sales channels were selected, publish the product to them
-    if (publications && publications.length > 0) {
+    // Step 1c: Publish the product to sales channels (with automatic fallback to all active publications if none were specified)
+    let publishIds = publications || [];
+    if (publishIds.length === 0) {
+      try {
+        const getPubsRes = await client.request(`
+          query {
+            publications(first: 10) {
+              nodes {
+                id
+              }
+            }
+          }
+        `);
+        const pubNodes = (getPubsRes as any).data?.publications?.nodes || [];
+        publishIds = pubNodes.map((n: any) => n.id);
+        console.log(`[Shopify API] Automatically fell back to publishing on ${publishIds.length} active publications.`);
+      } catch (pubErr: any) {
+        console.error("Failed to fetch default publications for fallback publishing:", pubErr.message);
+      }
+    }
+
+    if (publishIds.length > 0) {
       const publishMutation = `
         mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
           publishablePublish(id: $id, input: $input) {
@@ -593,7 +622,7 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
         }
       `;
       
-      const publishInput = publications.map((pubId: string) => ({ publicationId: pubId }));
+      const publishInput = publishIds.map((pubId: string) => ({ publicationId: pubId }));
       const publishResponse = await client.request(publishMutation, {
         variables: {
           id: productId,
@@ -1062,6 +1091,10 @@ app.get("/", (req: Request, res: Response) => {
           if (resPubs.ok) {
             const pubsData = await resPubs.json();
             setAvailablePublications(pubsData);
+            // On initial load, default check all compatible sales channels
+            if (selectedPubs.length === 0 && availablePublications.length === 0 && pubsData.length > 0) {
+              setSelectedPubs(pubsData.map(p => p.id));
+            }
           }
         } catch (err) {
           console.error("Failed to fetch data:", err);
@@ -1148,6 +1181,12 @@ app.get("/", (req: Request, res: Response) => {
 
       const handleSubmit = async (event) => {
         event.preventDefault();
+        
+        if (selectedPubs.length === 0) {
+          alert("You must select at least one sales channel to publish this deal!");
+          return;
+        }
+
         setLoading(true);
         try {
           const res = await fetch("/api/bundles", {
@@ -1161,7 +1200,7 @@ app.get("/", (req: Request, res: Response) => {
             setPrice("");
             setComponents([{ variantId: "", quantity: 1, title: "", image: "" }]);
             setStatus("ACTIVE");
-            setSelectedPubs([]);
+            setSelectedPubs(availablePublications.map(p => p.id));
             setIsVisible(false);
             setDescription("");
             setImageUrl("");

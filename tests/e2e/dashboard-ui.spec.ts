@@ -181,22 +181,18 @@ test.describe("Shopify Bundle App — Dashboard UI E2E Tests (Mocked API)", () =
     await expect(onlineStoreCheckbox).toBeVisible();
     await expect(shopAppCheckbox).toBeVisible();
 
-    // Verify initial unchecked state
-    await expect(onlineStoreCheckbox).not.toBeChecked();
-    await expect(shopAppCheckbox).not.toBeChecked();
-
-    // Toggle Online Store
-    await onlineStoreCheckbox.check();
+    // Verify initial checked state
     await expect(onlineStoreCheckbox).toBeChecked();
-
-    // Toggle Shop App
-    await shopAppCheckbox.check();
     await expect(shopAppCheckbox).toBeChecked();
 
     // Untoggle Online Store
     await onlineStoreCheckbox.uncheck();
     await expect(onlineStoreCheckbox).not.toBeChecked();
     await expect(shopAppCheckbox).toBeChecked(); // should remain checked
+
+    // Untoggle Shop App
+    await shopAppCheckbox.uncheck();
+    await expect(shopAppCheckbox).not.toBeChecked();
   });
 
   test("should submit the bundle with only the checked sales channels in the payload (confirming unchecked channels do not publish/merge)", async ({ page }) => {
@@ -241,12 +237,14 @@ test.describe("Shopify Bundle App — Dashboard UI E2E Tests (Mocked API)", () =
     // 3. Fill Price
     await page.locator('input[placeholder*="29.99"]').fill("24.99");
 
-    // 4. Sales Channels: Check "Online Store", leave "Shop App" Unchecked
+    // 4. Sales Channels: By default they are both checked, so we uncheck "Shop App" explicitly!
     const onlineStoreCheckbox = page.locator('label:has-text("Online Store") input');
     const shopAppCheckbox = page.locator('label:has-text("Shop App") input');
 
-    await onlineStoreCheckbox.check();
     await expect(onlineStoreCheckbox).toBeChecked();
+    await expect(shopAppCheckbox).toBeChecked();
+
+    await shopAppCheckbox.uncheck();
     await expect(shopAppCheckbox).not.toBeChecked();
 
     // 5. Submit Form
