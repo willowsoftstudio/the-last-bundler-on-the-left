@@ -12,6 +12,7 @@ model Session {
   shop                String
   state               String
   isOnline            Boolean   @default(false)
+  isPremium           Boolean   @default(false)
   scope               String?
   expires             DateTime?
   accessToken         String

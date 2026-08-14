@@ -8,6 +8,7 @@
     "start": "tsx web/backend/index.ts",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
     "build": "export DATABASE_URL=\"$(node -e \"const r = process.env.DATABASE_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.PRISMA_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL; if (r) { try { const u = new URL(r); u.searchParams.set('schema', 'the_last_bundler'); console.log(u.toString()); } catch (e) { console.log(r); } }\")\" && shopify app build && prisma generate && prisma db push",
     "postinstall": "export DATABASE_URL=\"$(node -e \"const r = process.env.DATABASE_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.PRISMA_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL; if (r) { try { const u = new URL(r); u.searchParams.set('schema', 'the_last_bundler'); console.log(u.toString()); } catch (e) { console.log(r); } }\")\" && prisma generate",
     "dev": "shopify app dev",
@@ -29,6 +30,7 @@
     "prisma": "^6.19.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@shopify/cli": "^4.6.1",
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.2",

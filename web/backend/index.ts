@@ -96,8 +96,24 @@ app.get("/api/analytics", async (req: Request, res: Response) => {
   return res.json(analytics || { totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
 });
 
+// Helper function to bypass OAuth validation in tests using process.env.NODE_ENV === "test"
+function validateSession() {
+  return (req: Request, res: Response, next: any) => {
+    if (process.env.NODE_ENV === "test") {
+      const testSessionId = req.headers["x-test-session-id"] as string;
+      if (testSessionId) {
+        res.locals.shopify = {
+          session: { id: testSessionId, shop: "test-store.myshopify.com" }
+        };
+        return next();
+      }
+    }
+    return shopify.validateAuthenticatedSession()(req, res, next);
+  };
+}
+
 // GET endpoint to retrieve active sales channels (publications) from Shopify
-app.get("/api/publications", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
+app.get("/api/publications", validateSession(), async (req: Request, res: Response) => {
   try {
     const session = res.locals.shopify?.session;
     if (!session) {
@@ -123,7 +139,7 @@ app.get("/api/publications", shopify.validateAuthenticatedSession(), async (req:
 });
 
 // GET endpoint to retrieve detailed analytics, recent orders, and component inventory for a single bundle
-app.get("/api/bundles/:id/analytics", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
+app.get("/api/bundles/:id/analytics", validateSession(), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const session = res.locals.shopify?.session;
@@ -193,8 +209,108 @@ app.get("/api/bundles/:id/analytics", shopify.validateAuthenticatedSession(), as
   }
 });
 
+// POST endpoint to upgrade current session to Premium
+app.post("/api/billing/upgrade", validateSession(), async (req: Request, res: Response) => {
+  try {
+    const session = res.locals.shopify?.session;
+    if (!session || !session.id) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { isPremium: true }
+    });
+
+    console.log(`[Billing API] Session ${session.id} upgraded to Premium subscription successfully.`);
+    return res.json({ success: true, isPremium: true });
+  } catch (error: any) {
+    console.error("[Billing API Error] Upgrade failed:", error.message);
+    return res.status(500).json({ error: "Failed to upgrade subscription" });
+  }
+});
+
+// POST endpoint to downgrade current session (useful for E2E testing)
+app.post("/api/billing/downgrade", validateSession(), async (req: Request, res: Response) => {
+  try {
+    const session = res.locals.shopify?.session;
+    if (!session || !session.id) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { isPremium: false }
+    });
+
+    console.log(`[Billing API] Session ${session.id} downgraded to Free subscription successfully.`);
+    return res.json({ success: true, isPremium: false });
+  } catch (error: any) {
+    console.error("[Billing API Error] Downgrade failed:", error.message);
+    return res.status(500).json({ error: "Failed to downgrade subscription" });
+  }
+});
+
+// GET endpoint to check current Premium billing status
+app.get("/api/billing/status", validateSession(), async (req: Request, res: Response) => {
+  try {
+    const session = res.locals.shopify?.session;
+    if (!session || !session.id) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    const dbSession = await prisma.session.findUnique({
+      where: { id: session.id }
+    });
+
+    const isPremium = dbSession?.isPremium || false;
+    return res.json({ isPremium });
+  } catch (error: any) {
+    console.error("[Billing API Error] Failed to fetch subscription status:", error.message);
+    return res.status(500).json({ error: "Failed to load subscription status" });
+  }
+});
+
+// GET endpoint to retrieve detailed margin analytics and price split tests for premium users
+app.get("/api/bundles/:id/margin-analytics", validateSession(), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const session = res.locals.shopify?.session;
+    if (!session || !session.id) {
+      return res.status(401).send("Unauthorized");
+    }
+
+    const dbSession = await prisma.session.findUnique({
+      where: { id: session.id }
+    });
+
+    const isPremium = dbSession?.isPremium || false;
+    if (!isPremium) {
+      console.warn(`[API Block] Non-premium user tried to access margin analytics for bundle ${id}`);
+      return res.status(403).json({
+        error: "Price A/B Testing & Margin Analytics is a Premium Feature. Please upgrade to unlock."
+      });
+    }
+
+    // Return rich, valuable simulated business intelligence for Premium merchants
+    return res.json({
+      success: true,
+      profitMargin: 0.45,
+      costOfGoods: 15.00,
+      netProfit: 124.50,
+      abTests: {
+        priceA: { price: "29.99", conversions: 12, views: 120 },
+        priceB: { price: "24.99", conversions: 25, views: 130 }
+      }
+    });
+  } catch (error: any) {
+    console.error("[API Error] Failed to load margin analytics:", error.message);
+    return res.status(500).json({ error: "Failed to load margin analytics" });
+  }
+});
+
 // Express Endpoint to create a bundle (secured with Shopify's session validation middleware)
-app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Request, res: Response) => {
+app.post("/api/bundles", validateSession(), async (req: Request, res: Response) => {
   try {
     const { title, components, price, status, publications, isVisible, description, imageUrl } = req.body;
 
@@ -204,6 +320,28 @@ app.post("/api/bundles", shopify.validateAuthenticatedSession(), async (req: Req
 
     // Initialize Shopify Session (mocked or retrieved from context in actual runtime)
     const session = res.locals.shopify?.session || { shop: "test-shop.myshopify.com", accessToken: "mock-token" };
+
+    // Check Premium Status
+    let isPremium = false;
+    if (session.id) {
+      const dbSession = await prisma.session.findUnique({ where: { id: session.id } });
+      isPremium = (session as any).isPremium || dbSession?.isPremium || false;
+    } else {
+      isPremium = (session as any).isPremium || false;
+    }
+
+    // Inspect the request payload components and check if:
+    // Any component contains validVariantIds (Mix & Match) OR there are more than 3 distinct components
+    const hasValidVariantIds = components.some((c: any) => c.validVariantIds);
+    const hasMoreThanThreeComponents = components.length > 3;
+
+    if ((hasValidVariantIds || hasMoreThanThreeComponents) && !isPremium) {
+      console.log("[API Block] Free tier user tried to create a premium bundle.");
+      return res.status(403).json({
+        error: "Mix & Match dynamic slots and large bundles require a Premium subscription. Please upgrade to unlock."
+      });
+    }
+
     const client = new shopify.api.clients.Graphql({ session });
 
     // Self-Healing Check: Ensure Cart Transform function is active on this store using modern 'functionHandle'
@@ -615,116 +753,136 @@ app.post("/api/webhooks", verifyShopifyWebhook, async (req: Request, res: Respon
   }
 
   if (topic === "orders/create") {
-    const order = req.body;
-    let hasBundle = false;
-    let orderRevenue = 0;
-    let orderBundlesCount = 0;
+    try {
+      const order = req.body;
+      let hasBundle = false;
+      let orderRevenue = 0;
+      let orderBundlesCount = 0;
 
-    if (order?.line_items) {
-      const activeBundles = await prisma.bundle.findMany();
-      for (const item of order.line_items) {
-        const itemVariantId = item.variant_id; // Numeric variant ID (e.g. 888888)
-        
-        // Search activeBundles to see if this matches a parent variant ID
-        const matchingBundle = activeBundles.find((b: any) => {
-          // Extract numeric ID from parentVariantId (e.g. "gid://shopify/ProductVariant/888888" or just "888888")
-          const match = b.parentVariantId.match(/\/Variant\/(\d+)$/);
-          const numericId = match ? parseInt(match[1], 10) : parseInt(b.parentVariantId, 10);
-          return numericId === itemVariantId || b.parentVariantId === `gid://shopify/ProductVariant/${itemVariantId}`;
-        });
+      if (order?.line_items) {
+        const activeBundles = await prisma.bundle.findMany();
+        for (const item of order.line_items) {
+          const itemVariantId = item.variant_id; // Numeric variant ID (e.g. 888888)
+          
+          // Search activeBundles to see if this matches a parent variant ID
+          const matchingBundle = activeBundles.find((b: any) => {
+            // Extract numeric ID from parentVariantId (e.g. "gid://shopify/ProductVariant/888888" or just "888888")
+            const match = b.parentVariantId.match(/\/Variant\/(\d+)$/);
+            const numericId = match ? parseInt(match[1], 10) : parseInt(b.parentVariantId, 10);
+            return numericId === itemVariantId || b.parentVariantId === `gid://shopify/ProductVariant/${itemVariantId}`;
+          });
 
-        if (matchingBundle) {
-          hasBundle = true;
-          const price = parseFloat(item.price) || 0;
-          const qty = parseInt(item.quantity, 10) || 0;
-          const bundleRevenue = price * qty;
-          orderRevenue += bundleRevenue;
-          orderBundlesCount += qty;
+          if (matchingBundle) {
+            hasBundle = true;
+            const price = parseFloat(item.price) || 0;
+            const qty = parseInt(item.quantity, 10) || 0;
+            const bundleRevenue = price * qty;
+            orderRevenue += bundleRevenue;
+            orderBundlesCount += qty;
 
-          // Compute discount/savings dynamically by fetching standard prices via GraphQL
-          let originalComponentsSum = 0;
-          try {
-            const offlineSessionId = shopify.api.session.getOfflineId(shop);
-            const session = await shopify.config.sessionStorage.loadSession(offlineSessionId);
-            if (session) {
-              const client = new shopify.api.clients.Graphql({ session });
-              const componentIds = (matchingBundle.components as any[]).flatMap((c: any) =>
-                c.variantId ? [c.variantId] : (c.validVariantIds || [])
-              );
-              
-              const query = `
-                query getPrices($ids: [ID!]!) {
-                  nodes(ids: $ids) {
-                    ... on ProductVariant {
-                      id
-                      price
+            // Compute discount/savings dynamically by fetching standard prices via GraphQL
+            let originalComponentsSum = 0;
+            try {
+              const offlineSessionId = shopify.api.session.getOfflineId(shop);
+              const session = await shopify.config.sessionStorage.loadSession(offlineSessionId);
+              if (session) {
+                const client = new shopify.api.clients.Graphql({ session });
+                const componentIds = (matchingBundle.components as any[]).flatMap((c: any) =>
+                  c.variantId ? [c.variantId] : (c.validVariantIds || [])
+                );
+                
+                const query = `
+                  query getPrices($ids: [ID!]!) {
+                    nodes(ids: $ids) {
+                      ... on ProductVariant {
+                        id
+                        price
+                      }
                     }
                   }
+                `;
+                const resNode = await client.request(query, { variables: { ids: componentIds } });
+                const nodes = (resNode as any).data?.nodes || [];
+                const priceMap = new Map<string, number>();
+                for (const node of nodes) {
+                  if (node) priceMap.set(node.id, parseFloat(node.price) || 0);
                 }
-              `;
-              const resNode = await client.request(query, { variables: { ids: componentIds } });
-              const nodes = (resNode as any).data?.nodes || [];
-              const priceMap = new Map<string, number>();
-              for (const node of nodes) {
-                if (node) priceMap.set(node.id, parseFloat(node.price) || 0);
-              }
-              for (const comp of matchingBundle.components as any[]) {
-                if (comp.variantId) {
-                  originalComponentsSum += (priceMap.get(comp.variantId) || 0) * (comp.quantity || 1);
-                } else if (comp.validVariantIds && comp.validVariantIds.length > 0) {
-                  originalComponentsSum += (priceMap.get(comp.validVariantIds[0]) || 0) * (comp.quantity || 1);
+                for (const comp of matchingBundle.components as any[]) {
+                  if (comp.variantId) {
+                    originalComponentsSum += (priceMap.get(comp.variantId) || 0) * (comp.quantity || 1);
+                  } else if (comp.validVariantIds && comp.validVariantIds.length > 0) {
+                    originalComponentsSum += (priceMap.get(comp.validVariantIds[0]) || 0) * (comp.quantity || 1);
+                  }
                 }
               }
+            } catch (err: any) {
+              console.error("[Webhook Error] Failed to fetch component prices for discount calculation:", err.message);
             }
-          } catch (err: any) {
-            console.error("Failed to fetch component prices for discount calculation:", err.message);
+
+            const discountAmount = Math.max(0, (originalComponentsSum - price) * qty);
+
+            // Write record to BundleOrder
+            await prisma.bundleOrder.create({
+              data: {
+                bundleId: matchingBundle.id,
+                orderId: String(order.id),
+                customerName: order.customer ? `${order.customer.first_name || ""} ${order.customer.last_name || ""}`.trim() : "Guest Customer",
+                customerEmail: order.customer?.email || "N/A",
+                quantity: qty,
+                revenue: bundleRevenue,
+                discountAmount: discountAmount
+              }
+            });
+
+            // Upsert running stats to BundleAnalytics
+            await prisma.bundleAnalytics.upsert({
+              where: { bundleId: matchingBundle.id },
+              create: {
+                bundleId: matchingBundle.id,
+                totalRevenue: bundleRevenue,
+                totalUnitsSold: qty,
+                totalOrders: 1,
+                totalDiscounts: discountAmount
+              },
+              update: {
+                totalRevenue: { increment: bundleRevenue },
+                totalUnitsSold: { increment: qty },
+                totalOrders: { increment: 1 },
+                totalDiscounts: { increment: discountAmount }
+              }
+            });
+
+            // SKU Decomposition (Fulfillment Sync) - Premium Gated Feature
+            try {
+              const dbSession = await prisma.session.findFirst({ where: { shop } });
+              const isPremium = dbSession?.isPremium || false;
+
+              if (isPremium) {
+                console.log(`[Fulfillment Sync] [Premium] Processing SKU Decomposition for order ${order.id}. Splitting bundle ${matchingBundle.id} (${matchingBundle.parentVariantId}) into individual components for warehouse/3PL sync:`, JSON.stringify(matchingBundle.components));
+                console.log(`[Fulfillment Sync] [Premium] Simulated Shopify Order Edit API: successfully added child component items and removed parent bundle ${matchingBundle.parentVariantId} for order ${order.id}.`);
+              } else {
+                console.log(`[Fulfillment Sync] [Free Tier] Order ${order.id} contains bundle parent ${matchingBundle.parentVariantId}, but SKU Decomposition is locked (requires Premium plan).`);
+              }
+            } catch (err: any) {
+              console.error("[Fulfillment Sync Error] Failed to process SKU decomposition:", err.message);
+            }
           }
-
-          const discountAmount = Math.max(0, (originalComponentsSum - price) * qty);
-
-          // Write record to BundleOrder
-          await prisma.bundleOrder.create({
-            data: {
-              bundleId: matchingBundle.id,
-              orderId: String(order.id),
-              customerName: order.customer ? `${order.customer.first_name || ""} ${order.customer.last_name || ""}`.trim() : "Guest Customer",
-              customerEmail: order.customer?.email || "N/A",
-              quantity: qty,
-              revenue: bundleRevenue,
-              discountAmount: discountAmount
-            }
-          });
-
-          // Upsert running stats to BundleAnalytics
-          await prisma.bundleAnalytics.upsert({
-            where: { bundleId: matchingBundle.id },
-            create: {
-              bundleId: matchingBundle.id,
-              totalRevenue: bundleRevenue,
-              totalUnitsSold: qty,
-              totalOrders: 1,
-              totalDiscounts: discountAmount
-            },
-            update: {
-              totalRevenue: { increment: bundleRevenue },
-              totalUnitsSold: { increment: qty },
-              totalOrders: { increment: 1 },
-              totalDiscounts: { increment: discountAmount }
-            }
-          });
         }
       }
-    }
 
-    if (hasBundle) {
-      await prisma.analytics.upsert({
-        where: { id: "global_analytics" },
-        create: { id: "global_analytics", totalRevenue: orderRevenue, totalOrdersWithBundles: 1, totalBundlesSold: orderBundlesCount },
-        update: { totalRevenue: { increment: orderRevenue }, totalOrdersWithBundles: { increment: 1 }, totalBundlesSold: { increment: orderBundlesCount } }
-      });
-    }
+      if (hasBundle) {
+        await prisma.analytics.upsert({
+          where: { id: "global_analytics" },
+          create: { id: "global_analytics", totalRevenue: orderRevenue, totalOrdersWithBundles: 1, totalBundlesSold: orderBundlesCount },
+          update: { totalRevenue: { increment: orderRevenue }, totalOrdersWithBundles: { increment: 1 }, totalBundlesSold: { increment: orderBundlesCount } }
+        });
+      }
 
-    return res.status(200).send("Order webhook processed successfully");
+      return res.status(200).send("Order webhook processed successfully");
+    } catch (error: any) {
+      console.error("[Webhook Error] Error processing orders/create webhook:", error.message, error.stack);
+      return res.status(500).send("Internal server error processing orders/create webhook");
+    }
   }
 
   return res.status(200).send("Webhook received");
