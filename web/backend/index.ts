@@ -85,17 +85,6 @@ app.get(
   shopify.redirectToShopifyOrAppRoot()
 );
 
-// GET endpoint to retrieve active bundles
-app.get("/api/bundles", async (req: Request, res: Response) => {
-  return res.json(await prisma.bundle.findMany());
-});
-
-// GET endpoint to retrieve analytics
-app.get("/api/analytics", async (req: Request, res: Response) => {
-  const analytics = await prisma.analytics.findUnique({ where: { id: "global_analytics" } });
-  return res.json(analytics || { totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
-});
-
 // Helper function to bypass OAuth validation in tests using process.env.NODE_ENV === "test"
 function validateSession() {
   return (req: Request, res: Response, next: any) => {
@@ -111,6 +100,103 @@ function validateSession() {
     return shopify.validateAuthenticatedSession()(req, res, next);
   };
 }
+
+// GET endpoint to retrieve active bundles with automatic self-healing validation
+app.get("/api/bundles", validateSession(), async (req: Request, res: Response) => {
+  try {
+    const session = res.locals.shopify?.session;
+    const bundles = await prisma.bundle.findMany();
+    if (bundles.length === 0) {
+      return res.json([]);
+    }
+
+    // Perform self-healing variant existence check (strictly in non-test mode)
+    if (process.env.NODE_ENV !== "test" && session) {
+      try {
+        const client = new shopify.api.clients.Graphql({ session });
+        const parentIds = bundles.map((b: any) => b.parentVariantId);
+        
+        const query = `
+          query checkVariants($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              id
+            }
+          }
+        `;
+        const response = await client.request(query, { variables: { ids: parentIds } });
+        const nodes = (response as any).data?.nodes || [];
+        const existingIds = new Set(nodes.filter(Boolean).map((n: any) => n.id));
+
+        const deadBundles = bundles.filter((b: any) => !existingIds.has(b.parentVariantId));
+        if (deadBundles.length > 0) {
+          console.warn(`[Self-Healing] Found ${deadBundles.length} bundles with deleted parent variants. Purging them...`);
+          for (const dead of deadBundles) {
+            // Purge from DB
+            await prisma.bundle.delete({ where: { id: dead.id } });
+            await prisma.bundleAnalytics.deleteMany({ where: { bundleId: dead.id } });
+            await prisma.bundleOrder.deleteMany({ where: { bundleId: dead.id } });
+          }
+
+          // Sync back to Shopify Metafields
+          const updatedBundles = await prisma.bundle.findMany();
+          const getMetafieldQuery = `
+            query {
+              shop {
+                id
+              }
+            }
+          `;
+          const mfRes = await client.request(getMetafieldQuery);
+          const shopId = (mfRes as any).data?.shop?.id;
+
+          const setMetafieldMutation = `
+            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `;
+          await client.request(setMetafieldMutation, {
+            variables: {
+              metafields: [
+                {
+                  ownerId: shopId,
+                  namespace: "bundle_app",
+                  key: "active_bundles",
+                  value: JSON.stringify(updatedBundles.map((b: any) => ({
+                    id: b.id,
+                    title: b.title,
+                    parentVariantId: b.parentVariantId,
+                    components: b.components
+                  }))),
+                  type: "json"
+                }
+              ]
+            }
+          });
+
+          return res.json(updatedBundles);
+        }
+      } catch (shErr: any) {
+        console.error("[Self-Healing Error] Failed to run variant existence check:", shErr.message);
+      }
+    }
+
+    return res.json(bundles);
+  } catch (err: any) {
+    console.error("[API Error] Failed to load bundles:", err.message);
+    return res.status(500).json({ error: "Failed to load bundles" });
+  }
+});
+
+// GET endpoint to retrieve analytics
+app.get("/api/analytics", async (req: Request, res: Response) => {
+  const analytics = await prisma.analytics.findUnique({ where: { id: "global_analytics" } });
+  return res.json(analytics || { totalRevenue: 0, totalOrdersWithBundles: 0, totalBundlesSold: 0 });
+});
 
 // GET endpoint to retrieve active sales channels (publications) from Shopify
 app.get("/api/publications", validateSession(), async (req: Request, res: Response) => {
