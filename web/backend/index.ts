@@ -1086,20 +1086,27 @@ app.get("/", (req: Request, res: Response) => {
           const resAnalytics = await fetch("/api/analytics");
           const analyticsData = await resAnalytics.json();
           setAnalytics(analyticsData);
-
-          const resPubs = await fetch("/api/publications");
-          if (resPubs.ok) {
-            const pubsData = await resPubs.json();
-            setAvailablePublications(pubsData);
-            // On initial load, default check all compatible sales channels
-            if (selectedPubs.length === 0 && availablePublications.length === 0 && pubsData.length > 0) {
-              setSelectedPubs(pubsData.map(p => p.id));
-            }
-          }
         } catch (err) {
           console.error("Failed to fetch data:", err);
         }
       };
+
+      // Fetch publications strictly once on mount (prevents interval closure from resetting selected channels!)
+      React.useEffect(() => {
+        const fetchPubs = async () => {
+          try {
+            const res = await fetch("/api/publications");
+            if (res.ok) {
+              const pubsData = await res.json();
+              setAvailablePublications(pubsData);
+              setSelectedPubs(pubsData.map(p => p.id)); // Default check all on mount
+            }
+          } catch (err) {
+            console.error("Failed to fetch publications on mount:", err);
+          }
+        };
+        fetchPubs();
+      }, []);
 
       React.useEffect(() => {
         fetchData();
