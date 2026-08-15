@@ -34,6 +34,8 @@ model Bundle {
   parentVariantId String
   price           String?
   status          String           @default("ACTIVE")
+  maxOrderLimit   Int              @default(1)
+  maxCustomerLimit Int?
   components      Json             // Array of { variantId: string, quantity: number }
   salesChannels   Json?            // Array of string identifiers or publication objects
   createdAt       DateTime         @default(now())

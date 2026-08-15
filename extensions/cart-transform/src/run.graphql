@@ -1,5 +1,12 @@
 query RunInput {
   cart {
+    buyerIdentity {
+      customer {
+        purchasedDeals: metafield(namespace: "bundle_app", key: "purchased_deals") {
+          value
+        }
+      }
+    }
     lines {
       id
       quantity

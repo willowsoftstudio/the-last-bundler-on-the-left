@@ -406,4 +406,82 @@ describe("Cart Transform Function - run() Unit Tests", () => {
     // Should output empty operations because the parent variant is already in the cart and limitOne is true!
     expect(output.operations).toHaveLength(0);
   });
+
+  it("should cap bundle creation to maxOrderLimit when components in the cart exceed the limit", () => {
+    const limitedOrderBundles: BundleDefinition[] = [
+      {
+        id: "bundle-order-limit",
+        title: "Test Order Limit Bundle",
+        parentVariantId: "gid://shopify/ProductVariant/ParentBundle1",
+        maxOrderLimit: 2, // Max of 2 bundles per order!
+        components: [
+          { variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 1 }
+        ]
+      }
+    ];
+
+    const input: RunInput = {
+      cart: {
+        lines: [
+          {
+            id: "gid://shopify/CartLine/Component",
+            quantity: 5, // We have 5 components in the cart (enough to form 5 bundles, but should cap to 2!)
+            merchandise: { id: "gid://shopify/ProductVariant/ComponentA", title: "Component Product", product: { id: "p1", title: "Comp" } }
+          }
+        ]
+      },
+      shop: {
+        bundleMetafields: {
+          value: JSON.stringify(limitedOrderBundles)
+        }
+      }
+    };
+
+    const output = run(input);
+    expect(output.operations).toHaveLength(1);
+    expect(output.operations[0].linesMerge.cartLines[0].quantity).toEqual(2); // strictly capped to 2!
+  });
+
+  it("should block bundle creation if customer purchasedDeals count meets or exceeds maxCustomerLimit", () => {
+    const limitedCustBundles: BundleDefinition[] = [
+      {
+        id: "bundle-cust-limit",
+        title: "Test Customer Limit Bundle",
+        parentVariantId: "gid://shopify/ProductVariant/ParentBundle1",
+        maxCustomerLimit: 1, // Max of 1 bundle per customer lifetime!
+        components: [
+          { variantId: "gid://shopify/ProductVariant/ComponentA", quantity: 1 }
+        ]
+      }
+    ];
+
+    const input: RunInput = {
+      cart: {
+        buyerIdentity: {
+          customer: {
+            purchasedDeals: {
+              // The customer has ALREADY purchased 1 bundle of this type!
+              value: JSON.stringify({ "bundle-cust-limit": 1 })
+            }
+          }
+        },
+        lines: [
+          {
+            id: "gid://shopify/CartLine/Component",
+            quantity: 1,
+            merchandise: { id: "gid://shopify/ProductVariant/ComponentA", title: "Component Product", product: { id: "p1", title: "Comp" } }
+          }
+        ]
+      },
+      shop: {
+        bundleMetafields: {
+          value: JSON.stringify(limitedCustBundles)
+        }
+      }
+    };
+
+    const output = run(input);
+    // Should block bundle merging because the customer lifetime purchase limit has been reached!
+    expect(output.operations).toHaveLength(0);
+  });
 });

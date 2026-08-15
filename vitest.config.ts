@@ -6,6 +6,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
+      reportsDirectory: "./coverage", // Explicitly compile coverage output to local project folder
       include: ["web/backend/**/*.ts", "extensions/cart-transform/**/*.ts"]
     }
   }

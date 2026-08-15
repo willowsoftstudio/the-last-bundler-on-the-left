@@ -421,7 +421,7 @@ app.get("/api/bundles/:id/margin-analytics", validateSession(), async (req: Requ
 // Express Endpoint to create a bundle (secured with Shopify's session validation middleware)
 app.post("/api/bundles", validateSession(), async (req: Request, res: Response) => {
   try {
-    const { title, components, price, status, publications, isVisible, description, imageUrl } = req.body;
+    const { title, components, price, status, publications, isVisible, description, imageUrl, maxOrderLimit, maxCustomerLimit } = req.body;
 
     if (!title || !components || components.length === 0 || !price) {
       return res.status(400).json({ error: "Missing required bundle fields" });
@@ -462,6 +462,8 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
           parentVariantId: "gid://shopify/ProductVariant/MockParentId",
           price: formattedPrice,
           status: status || "ACTIVE",
+          maxOrderLimit: parseInt(maxOrderLimit, 10) || 1,
+          maxCustomerLimit: maxCustomerLimit ? parseInt(maxCustomerLimit, 10) : null,
           components: components,
           salesChannels: publications || []
         }
@@ -473,7 +475,8 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
           title,
           price: formattedPrice,
           parentVariantId: "gid://shopify/ProductVariant/MockParentId",
-          limitOne: true,
+          maxOrderLimit: parseInt(maxOrderLimit, 10) || 1,
+          maxCustomerLimit: maxCustomerLimit ? parseInt(maxCustomerLimit, 10) : null,
           components: components.map((c: any) => ({
             variantId: c.variantId,
             quantity: parseInt(c.quantity, 10) || 1,
@@ -686,7 +689,7 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
     const newBundleId = `bundle_${Date.now()}`;
     const formattedPrice = parseFloat(price).toFixed(2);
 
-    // Save copy in app database first (storing status, price, and components!)
+    // Save copy in app database first (storing status, price, limitations, and components!)
     await prisma.bundle.create({
       data: {
         id: newBundleId,
@@ -694,6 +697,8 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
         parentVariantId,
         price: formattedPrice,
         status: status || "ACTIVE",
+        maxOrderLimit: parseInt(maxOrderLimit, 10) || 1,
+        maxCustomerLimit: maxCustomerLimit ? parseInt(maxCustomerLimit, 10) : null,
         components: components,
         salesChannels: publications || []
       }
@@ -721,7 +726,8 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
       title: b.title,
       price: b.price || "0.00",
       parentVariantId: b.parentVariantId,
-      limitOne: true, // Automatically enforce maximum of 1 bundle per order to prevent checkout price-doubling
+      maxOrderLimit: b.maxOrderLimit || 1,
+      maxCustomerLimit: b.maxCustomerLimit || null,
       components: (b.components as any[]).map((c: any) => ({
         variantId: c.variantId,
         quantity: parseInt(c.quantity, 10) || 1,
@@ -772,7 +778,8 @@ app.post("/api/bundles", validateSession(), async (req: Request, res: Response) 
       title,
       price: formattedPrice,
       parentVariantId,
-      limitOne: true,
+      maxOrderLimit: parseInt(maxOrderLimit, 10) || 1,
+      maxCustomerLimit: maxCustomerLimit ? parseInt(maxCustomerLimit, 10) : null,
       components: components.map((c: any) => ({
         variantId: c.variantId,
         quantity: parseInt(c.quantity, 10) || 1,
@@ -834,7 +841,8 @@ app.patch("/api/bundles/:id", validateSession(), async (req: Request, res: Respo
       title: b.title,
       price: b.price || "0.00",
       parentVariantId: b.parentVariantId,
-      limitOne: true,
+      maxOrderLimit: b.maxOrderLimit || 1,
+      maxCustomerLimit: b.maxCustomerLimit || null,
       components: (b.components as any[]).map((c: any) => ({
         variantId: c.variantId,
         quantity: parseInt(c.quantity, 10) || 1,
@@ -972,7 +980,8 @@ app.delete("/api/bundles/:id", validateSession(), async (req: Request, res: Resp
         title: b.title,
         price: b.price || "0.00",
         parentVariantId: b.parentVariantId,
-        limitOne: true,
+        maxOrderLimit: b.maxOrderLimit || 1,
+        maxCustomerLimit: b.maxCustomerLimit || null,
         components: (b.components as any[]).map((c: any) => ({
           variantId: c.variantId,
           quantity: parseInt(c.quantity, 10) || 1,
@@ -1132,6 +1141,71 @@ app.post("/api/webhooks", verifyShopifyWebhook, async (req: Request, res: Respon
               }
             });
 
+            // If the order has an associated customer, update their lifetime purchase count metafield (Option B)
+            if (order.customer && order.customer.id) {
+              try {
+                const customerGid = `gid://shopify/Customer/${order.customer.id}`;
+                const offlineSessionId = shopify.api.session.getOfflineId(shop);
+                const session = await shopify.config.sessionStorage.loadSession(offlineSessionId);
+                if (session) {
+                  const client = new shopify.api.clients.Graphql({ session });
+
+                  // 1. Fetch current customer metafield value
+                  const getCustomerMetafieldQuery = `
+                    query getCustomerMetafield($id: ID!) {
+                      customer(id: $id) {
+                        metafield(namespace: "bundle_app", key: "purchased_deals") {
+                          value
+                        }
+                      }
+                    }
+                  `;
+                  const mfRes = await client.request(getCustomerMetafieldQuery, { variables: { id: customerGid } });
+                  const existingVal = (mfRes as any).data?.customer?.metafield?.value;
+
+                  let purchasedCounts: Record<string, number> = {};
+                  if (existingVal) {
+                    try {
+                      purchasedCounts = JSON.parse(existingVal);
+                    } catch (e) {
+                      purchasedCounts = {};
+                    }
+                  }
+
+                  // 2. Increment purchase count for this specific bundle ID
+                  purchasedCounts[matchingBundle.id] = (purchasedCounts[matchingBundle.id] || 0) + qty;
+
+                  // 3. Write updated JSON back to the Customer Metafield
+                  const setCustomerMetafieldMutation = `
+                    mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+                      metafieldsSet(metafields: $metafields) {
+                        userErrors {
+                          field
+                          message
+                        }
+                      }
+                    }
+                  `;
+                  await client.request(setCustomerMetafieldMutation, {
+                    variables: {
+                      metafields: [
+                        {
+                          ownerId: customerGid,
+                          namespace: "bundle_app",
+                          key: "purchased_deals",
+                          value: JSON.stringify(purchasedCounts),
+                          type: "json"
+                        }
+                      ]
+                    }
+                  });
+                  console.log(`[Fulfillment Sync] [Premium] Incremented lifetime purchase count for Customer ${customerGid} on bundle ${matchingBundle.id}:`, JSON.stringify(purchasedCounts));
+                }
+              } catch (custMfErr: any) {
+                console.error("[Fulfillment Sync Error] Failed to update Customer Lifetime Metafield:", custMfErr.message);
+              }
+            }
+
             // SKU Decomposition (Fulfillment Sync) - Premium Gated Feature
             try {
               const dbSession = await prisma.session.findFirst({ where: { shop } });
@@ -1227,6 +1301,8 @@ app.get("/", (req: Request, res: Response) => {
     function App() {
       const [title, setTitle] = React.useState("");
       const [price, setPrice] = React.useState("");
+      const [maxOrderLimit, setMaxOrderLimit] = React.useState("1");
+      const [maxCustomerLimit, setMaxCustomerLimit] = React.useState("");
       const [components, setComponents] = React.useState([
         { variantId: "", quantity: 1, title: "", image: "" }
       ]);
@@ -1364,12 +1440,25 @@ app.get("/", (req: Request, res: Response) => {
           const res = await fetch("/api/bundles", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, price, components, status, publications: selectedPubs, isVisible, description, imageUrl })
+            body: JSON.stringify({
+              title,
+              price,
+              components,
+              status,
+              publications: selectedPubs,
+              isVisible,
+              description,
+              imageUrl,
+              maxOrderLimit,
+              maxCustomerLimit
+            })
           });
           const data = await res.json();
           if (res.ok) {
             setTitle("");
             setPrice("");
+            setMaxOrderLimit("1");
+            setMaxCustomerLimit("");
             setComponents([{ variantId: "", quantity: 1, title: "", image: "" }]);
             setStatus("ACTIVE");
             setSelectedPubs(availablePublications.map(p => p.id));
@@ -1529,6 +1618,34 @@ app.get("/", (req: Request, res: Response) => {
                     required: true,
                     style: { width: "97%", padding: "10px", borderRadius: "6px", border: "1px solid #c9cccf", fontSize: "15px" }
                   })
+                ]),
+
+                // Max Order Limit (Per-Order checkout capping)
+                e("div", { style: { marginBottom: "20px" } }, [
+                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "Max Bundles Per Checkout (Per-Order Limit)"),
+                  e("input", {
+                    type: "number",
+                    min: "1",
+                    value: maxOrderLimit,
+                    onChange: (ev) => setMaxOrderLimit(ev.target.value),
+                    required: true,
+                    style: { width: "97%", padding: "10px", borderRadius: "6px", border: "1px solid #c9cccf", fontSize: "15px" }
+                  }),
+                  e("p", { style: { fontSize: "12px", color: "#6d7175", marginTop: "4px" } }, "Limits how many times this bundle deal can be created in a single checkout order.")
+                ]),
+
+                // Max Customer Limit (Per-Customer lifetime capping)
+                e("div", { style: { marginBottom: "20px" } }, [
+                  e("label", { style: { fontWeight: "500", display: "block", marginBottom: "4px" } }, "Max Bundles Per Customer Lifetime (Optional)"),
+                  e("input", {
+                    type: "number",
+                    min: "1",
+                    placeholder: "e.g., 1 (Leave empty for no limit)",
+                    value: maxCustomerLimit,
+                    onChange: (ev) => setMaxCustomerLimit(ev.target.value),
+                    style: { width: "97%", padding: "10px", borderRadius: "6px", border: "1px solid #c9cccf", fontSize: "15px" }
+                  }),
+                  e("p", { style: { fontSize: "12px", color: "#6d7175", marginTop: "4px" } }, "Limits the total lifetime purchases of this deal per customer (tracked via secure Customer GID metafields).")
                 ]),
 
                 e("div", { style: { marginBottom: "20px" } }, [

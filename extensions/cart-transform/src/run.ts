@@ -1,5 +1,12 @@
 export interface RunInput {
   cart: {
+    buyerIdentity?: {
+      customer?: {
+        purchasedDeals?: {
+          value?: string | null;
+        } | null;
+      } | null;
+    } | null;
     lines: Array<{
       id: string;
       quantity: number;
@@ -56,6 +63,8 @@ export interface BundleDefinition {
   price?: string; // Stored as a string with exactly 2 decimal places e.g. "29.99"
   parentVariantId: string; // e.g. "gid://shopify/ProductVariant/Parent"
   limitOne?: boolean; // Caps the maximum number of bundles formed to exactly 1 per checkout
+  maxOrderLimit?: number; // Customizable Per-Order limit
+  maxCustomerLimit?: number; // Customizable Per-Customer lifetime limit
   components: Array<{
     variantId?: string; // e.g. "gid://shopify/ProductVariant/A"
     validVariantIds?: string[]; // e.g. ["gid://shopify/ProductVariant/A", "gid://shopify/ProductVariant/B"]
@@ -95,13 +104,41 @@ export function run(input: RunInput): RunOutput {
 
   // Iterate over each active bundle configuration to see if it can be formed
   for (const bundle of activeBundles) {
-    // If limitOne is enabled, check if the parent variant is already present in the cart lines (from a previous merge run)
-    if (bundle.limitOne) {
-      const isParentAlreadyInCart = cartLines.some(
+    // 1. Per-Customer Lifetime Limit Check
+    if (bundle.maxCustomerLimit) {
+      let purchasedCounts: Record<string, number> = {};
+      const metafieldVal = input.cart.buyerIdentity?.customer?.purchasedDeals?.value;
+      if (metafieldVal) {
+        try {
+          purchasedCounts = JSON.parse(metafieldVal) as Record<string, number>;
+        } catch (e) {
+          purchasedCounts = {};
+        }
+      }
+      const count = purchasedCounts[bundle.id] || 0;
+      if (count >= bundle.maxCustomerLimit) {
+        continue; // Block bundle from merging completely!
+      }
+    }
+
+    // 2. Per-Order Limit Check (Allowed Remaining Quantity Check)
+    let allowedOrderQty = Infinity;
+    if (bundle.maxOrderLimit !== undefined && bundle.maxOrderLimit !== null) {
+      allowedOrderQty = bundle.maxOrderLimit;
+    } else if (bundle.limitOne) {
+      allowedOrderQty = 1;
+    }
+
+    let allowedNewBundles = Infinity;
+    if (allowedOrderQty !== Infinity) {
+      const parentLines = cartLines.filter(
         (line) => line.merchandise.id === bundle.parentVariantId
       );
-      if (isParentAlreadyInCart) {
-        continue; // Skip merging any further components for this deal!
+      const currentParentQty = parentLines.reduce((acc, l) => acc + l.quantity, 0);
+
+      allowedNewBundles = Math.max(0, allowedOrderQty - currentParentQty);
+      if (allowedNewBundles <= 0) {
+        continue; // No further bundles allowed in this checkout!
       }
     }
 
@@ -149,9 +186,9 @@ export function run(input: RunInput): RunOutput {
       ...componentMatches.map((m) => Math.floor(m.totalAvailableQty / m.component.quantity))
     );
 
-    // Limit bundle creation to exactly 1 if limitOne constraint is enabled to prevent price doubling issues
-    if (bundle.limitOne && totalBundlesCreated > 1) {
-      totalBundlesCreated = 1;
+    // Cap bundle creation to the remaining allowed order quantity (maxOrderLimit or limitOne)
+    if (totalBundlesCreated > allowedNewBundles) {
+      totalBundlesCreated = allowedNewBundles;
     }
 
     if (totalBundlesCreated > 0) {

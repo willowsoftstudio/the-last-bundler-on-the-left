@@ -231,6 +231,8 @@ test.describe("Shopify Bundle App — Dashboard UI E2E Tests (Mocked API)", () =
               title: capturedPayload.title,
               price: capturedPayload.price,
               parentVariantId: "gid://shopify/ProductVariant/MockParentId",
+              maxOrderLimit: capturedPayload.maxOrderLimit,
+              maxCustomerLimit: capturedPayload.maxCustomerLimit,
               components: capturedPayload.components
             }
           })
@@ -255,6 +257,10 @@ test.describe("Shopify Bundle App — Dashboard UI E2E Tests (Mocked API)", () =
     // 3. Fill Price
     await page.locator('input[placeholder*="29.99"]').fill("24.99");
 
+    // 3b. Fill Limitations (Per-Order and Per-Customer limits)
+    await page.locator('label:has-text("Max Bundles Per Checkout") + input').fill("3");
+    await page.locator('label:has-text("Max Bundles Per Customer Lifetime") + input').fill("1");
+
     // 4. Sales Channels: By default they are both checked, so we uncheck "Shop App" explicitly!
     const onlineStoreCheckbox = page.locator('label:has-text("Online Store") input');
     const shopAppCheckbox = page.locator('label:has-text("Shop App") input');
@@ -269,10 +275,12 @@ test.describe("Shopify Bundle App — Dashboard UI E2E Tests (Mocked API)", () =
     const submitButton = page.locator('button:has-text("Save and Activate Deal")');
     await submitButton.click();
 
-    // 6. Assert that the captured POST request payload contains correct publications
+    // 6. Assert that the captured POST request payload contains correct publications and limitations
     expect(capturedPayload).not.toBeNull();
     expect(capturedPayload.title).toBe("E2E Custom Channel Deal");
     expect(capturedPayload.price).toBe("24.99");
+    expect(capturedPayload.maxOrderLimit).toBe("3");
+    expect(capturedPayload.maxCustomerLimit).toBe("1");
 
     // "Online Store" is checked, "Shop App" is unchecked.
     // Asserting Online Store Publication GID is included, and Shop App Publication GID is excluded!
